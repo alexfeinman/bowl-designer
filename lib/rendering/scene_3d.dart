@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:vector_math/vector_math_64.dart' as vm;
@@ -24,30 +27,12 @@ class Camera3D {
 }
 
 /// A flat, colored polygon in world space (mm), tagged with its ring index.
-/// [edgeVis] marks, per edge i (points[i] -> points[i+1]), whether it is an
-/// original segment boundary (true) or a seam introduced by BSP splitting
-/// (false); null means every edge is original.
 class _Face {
-  _Face(this.points, this.color, this.shade, this.ringIndex, [this.edgeVis]);
+  _Face(this.points, this.color, this.shade, this.ringIndex);
   final List<vm.Vector3> points;
   final Color color;
   final double shade;
   final int ringIndex;
-  final List<bool>? edgeVis;
-
-  bool edgeVisible(int i) => edgeVis == null || edgeVis![i];
-}
-
-/// A projected, shaded face ready to draw or hit-test.
-class _Projected {
-  _Projected(this.pts, this.depth, this.color, this.ringIndex, this.edgeVis);
-  final List<Offset> pts;
-  final double depth; // view-space z; larger (less negative) = nearer camera
-  final Color color;
-  final int ringIndex;
-  final List<bool>? edgeVis;
-
-  bool edgeVisible(int i) => edgeVis == null || edgeVis![i];
 }
 
 const _light = [0.35, 0.82, 0.45];
@@ -66,7 +51,7 @@ List<_Face> _buildFaces(BowlProject project) {
     final n = ring.segmentCount;
     final slot = 2 * math.pi / n;
     final half = ring.gapMm / 2; // flat gap: each face offset in by half
-    final rot = ri * (math.pi / n); // #4 half-segment stagger per course
+    final rot = ri * (math.pi / n); // half-segment stagger per course
     final so = math.sqrt(math.max(0.0, ro * ro - half * half));
     final si = rInner > 0 ? math.sqrt(math.max(0.0, rInner * rInner - half * half)) : 0.0;
 
@@ -93,8 +78,8 @@ List<_Face> _buildFaces(BowlProject project) {
       if (rInner > 0.5) {
         _addFace(faces, [v(iS, y0), v(iS, y1), v(iE, y1), v(iE, y0)], col, ri);
       }
-      // Top and bottom faces (bottom now on every course, so the underside
-      // reads correctly when viewed from below).
+      // Top and bottom faces (bottom on every course so the underside reads
+      // correctly when viewed from below).
       _addFace(faces, [v(iS, y1), v(oS, y1), v(oE, y1), v(iE, y1)],
           _lighten(col, 0.06), ri);
       _addFace(faces, [v(oS, y0), v(iS, y0), v(iE, y0), v(oE, y0)],
@@ -122,275 +107,240 @@ void _addFace(List<_Face> faces, List<vm.Vector3> pts, Color color, int ri) {
 Color _lighten(Color c, double t) => Color.lerp(c, const Color(0xFFFFFFFF), t)!;
 Color _darken(Color c, double t) => Color.lerp(c, const Color(0xFF000000), t)!;
 
-// ---------------------------------------------------------------------------
-// BSP tree — exact hidden-surface ordering.
-//
-// Depth-sorting whole faces (painter's algorithm) can't resolve faces that
-// overlap in screen space at different depths, so a low ring's top face could
-// paint over the walls in front of it. A BSP tree splits any face that
-// straddles another's plane and, for a given eye, yields a provably correct
-// back-to-front draw order. It's built once per geometry (cached) and only the
-// traversal depends on the camera.
-// ---------------------------------------------------------------------------
-
-const double _bspEps = 1e-4;
-
-class _Plane {
-  _Plane(this.n, this.d);
-  final vm.Vector3 n;
-  final double d;
-  double side(vm.Vector3 p) => n.dot(p) - d;
-}
-
-_Plane _planeOf(List<vm.Vector3> pts) {
-  final n = (pts[1] - pts[0]).cross(pts[2] - pts[0])..normalize();
-  return _Plane(n, n.dot(pts[0]));
-}
-
-class _BspNode {
-  _BspNode(this.plane);
-  final _Plane plane;
-  final List<_Face> coplanar = [];
-  _BspNode? front;
-  _BspNode? back;
-}
-
-/// Clip [face] to one half-space of [plane], keeping the front (side >= 0) when
-/// [keepFront], else the back. Carries edge-visibility through so the seam left
-/// along the cut plane is marked invisible while original boundaries are kept.
-_Face? _clip(_Face face, _Plane plane, List<double> sides, bool keepFront) {
-  final pts = <vm.Vector3>[];
-  final vis = <bool>[];
-  final s = keepFront ? 1.0 : -1.0; // orient tests so "inside" is side*s >= 0
-  final n = face.points.length;
-  for (var i = 0; i < n; i++) {
-    final j = (i + 1) % n;
-    final a = face.points[i], b = face.points[j];
-    final sa = sides[i] * s, sb = sides[j] * s;
-    final e = face.edgeVisible(i);
-    final aIn = sa >= -_bspEps;
-    final bIn = sb >= -_bspEps;
-    if (aIn) {
-      pts.add(a);
-      if (bIn) {
-        vis.add(e); // whole edge kept, still original
-      } else {
-        vis.add(e); // a -> intersection: original portion
-        final t = sides[i] / (sides[i] - sides[j]);
-        pts.add(a + (b - a) * t);
-        vis.add(false); // intersection -> next: the cut seam
-      }
-    } else if (bIn) {
-      final t = sides[i] / (sides[i] - sides[j]);
-      pts.add(a + (b - a) * t);
-      vis.add(e); // intersection -> b: original portion
+/// Wavefront OBJ of the exact mesh the 3D view builds (same gaps, stagger,
+/// per-face geometry). Vertices are not shared between faces — fine for
+/// inspection in an external viewer. Lets a mesh bug be told from a render bug.
+String meshObj(BowlProject project) {
+  final faces = _buildFaces(project);
+  final sb = StringBuffer('# Segmented Bowl Designer mesh export\n');
+  var idx = 1;
+  for (final f in faces) {
+    for (final p in f.points) {
+      sb.writeln('v ${p.x.toStringAsFixed(4)} '
+          '${p.y.toStringAsFixed(4)} ${p.z.toStringAsFixed(4)}');
     }
+    sb.write('f');
+    for (var k = 0; k < f.points.length; k++) {
+      sb.write(' ${idx + k}');
+    }
+    sb.writeln();
+    idx += f.points.length;
   }
-  if (pts.length < 3) return null;
-  return _Face(pts, face.color, face.shade, face.ringIndex, vis);
+  return sb.toString();
 }
 
-/// Classify [f] against [plane], adding it (whole or split) to the right bucket.
-void _classify(_Face f, _Plane plane, List<_Face> coplanar, List<_Face> front,
-    List<_Face> back) {
-  final sides = [for (final p in f.points) plane.side(p)];
-  var hasF = false, hasB = false;
-  for (final s in sides) {
-    if (s > _bspEps) hasF = true;
-    if (s < -_bspEps) hasB = true;
+// ---------------------------------------------------------------------------
+// Z-buffer software rasterizer.
+//
+// Sorting whole faces (painter's algorithm) or ordering them with a BSP tree
+// both mis-resolve this mesh: many faces share planes through the axis, so no
+// single draw order is correct. A per-pixel depth buffer has no ordering
+// assumption — each pixel keeps the nearest fragment — so occlusion is always
+// right regardless of how the faces overlap.
+// ---------------------------------------------------------------------------
+
+/// A rendered frame: the image plus a per-pixel ring-index map for hit-testing.
+class RasterResult {
+  RasterResult._(this.image, this.width, this.height, this._ringId);
+  final ui.Image image;
+  final int width;
+  final int height;
+  final Int32List _ringId; // 0 = empty, else ringIndex + 1
+
+  /// Ring index under [local] (in a widget of [widgetSize]), or null.
+  int? ringIndexAt(Offset local, Size widgetSize) {
+    if (widgetSize.width <= 0 || widgetSize.height <= 0) return null;
+    final x = (local.dx / widgetSize.width * width).floor().clamp(0, width - 1);
+    final y = (local.dy / widgetSize.height * height).floor().clamp(0, height - 1);
+    final r = _ringId[y * width + x];
+    return r == 0 ? null : r - 1;
   }
-  if (!hasF && !hasB) {
-    coplanar.add(f); // lies in the plane
-    return;
-  }
-  if (!hasB) {
-    front.add(f);
-    return;
-  }
-  if (!hasF) {
-    back.add(f);
-    return;
-  }
-  final fp = _clip(f, plane, sides, true);
-  final bp = _clip(f, plane, sides, false);
-  if (fp != null) front.add(fp);
-  if (bp != null) back.add(bp);
+
+  void dispose() => image.dispose();
 }
 
-_BspNode? _buildBsp(List<_Face> faces) {
-  if (faces.isEmpty) return null;
-  final node = _BspNode(_planeOf(faces[0].points));
-  node.coplanar.add(faces[0]);
-  final front = <_Face>[];
-  final back = <_Face>[];
-  for (var i = 1; i < faces.length; i++) {
-    _classify(faces[i], node.plane, node.coplanar, front, back);
+/// Render [project] from [camera] into an image sized to [size], with the
+/// segments of [highlightRingIndex] outlined in the accent colour.
+Future<RasterResult?> rasterizeScene(
+  BowlProject project,
+  Camera3D camera,
+  Size size, {
+  int? highlightRingIndex,
+}) {
+  if (project.rings.isEmpty || size.width < 2 || size.height < 2) {
+    return Future.value(null);
   }
-  node.front = _buildBsp(front);
-  node.back = _buildBsp(back);
-  return node;
-}
+  // Cap the internal resolution; the image is stretched to the pane on display.
+  const maxDim = 900.0;
+  final resScale = math.min(1.0, maxDim / math.max(size.width, size.height));
+  final w = math.max(2, (size.width * resScale).round());
+  final h = math.max(2, (size.height * resScale).round());
 
-/// Append faces to [out] in back-to-front order as seen from [eye].
-void _bspOrder(_BspNode? node, vm.Vector3 eye, List<_Face> out) {
-  if (node == null) return;
-  if (node.plane.side(eye) >= 0) {
-    _bspOrder(node.back, eye, out); // far half first
-    out.addAll(node.coplanar);
-    _bspOrder(node.front, eye, out);
-  } else {
-    _bspOrder(node.front, eye, out);
-    out.addAll(node.coplanar);
-    _bspOrder(node.back, eye, out);
-  }
-}
-
-// Cache the tree by project identity (immutable; edits produce a new instance).
-BowlProject? _cachedProject;
-_BspNode? _cachedTree;
-
-List<_Face> _orderedFaces(BowlProject project, vm.Matrix4 viewModel) {
-  if (!identical(project, _cachedProject)) {
-    _cachedTree = _buildBsp(_buildFaces(project));
-    _cachedProject = project;
-  }
-  // Eye position in geometry space = inverse(viewModel) applied to the origin.
-  final eye = (viewModel.clone()..invert()).transform3(vm.Vector3.zero());
-  final out = <_Face>[];
-  _bspOrder(_cachedTree, eye, out);
-  return out;
-}
-
-/// Project every face to screen space and shade it, nearest last (draw order).
-List<_Projected> _projectScene(
-    BowlProject project, Camera3D camera, Size size, bool xray) {
   final radius = project.maxOuterDiameterMm / 2;
   final extent = math.max(radius, project.totalHeightMm / 2) * 2.2;
-  // Keep the camera at a FIXED distance (always outside the object) and apply
-  // zoom as a magnification of the projected image. Dollying the camera in
-  // (camDist / zoom) would push it inside the rings, so faces crossed behind
-  // the near plane and projected to garbage — the "worse when zoomed" artefact.
+  // Camera at a fixed distance (outside the object); zoom magnifies the image.
   final camDist = extent;
-
   final model = vm.Matrix4.identity()
     ..rotateX(camera.pitch)
     ..rotateY(camera.yaw);
   final view = vm.makeViewMatrix(
       vm.Vector3(0, 0, camDist), vm.Vector3.zero(), vm.Vector3(0, 1, 0));
-  final aspect = size.width <= 0 || size.height <= 0 ? 1.0 : size.width / size.height;
-  final proj = vm.makePerspectiveMatrix(45 * math.pi / 180, aspect, 1, extent * 6);
-  final viewModel = view * model;
-  final mvp = proj * viewModel;
+  final proj = vm.makePerspectiveMatrix(45 * math.pi / 180, w / h, 1, extent * 6);
+  final mvp = proj * (view * model);
+  final ccx = w / 2, ccy = h / 2, zoom = camera.zoom;
 
-  final cx = size.width / 2, cy = size.height / 2;
-  final z = camera.zoom;
+  final n = w * h;
+  final rgba = Uint8List(n * 4);
+  final depth = Float32List(n)..fillRange(0, n, 1e30);
+  final faceId = Int32List(n);
+  final ringId = Int32List(n);
 
-  // Faces already come back in exact back-to-front order from the BSP tree, so
-  // no depth sorting (and no per-face heuristic) is needed — just project them.
-  final out = <_Projected>[];
-  for (final f in _orderedFaces(project, viewModel)) {
-    final screen = <Offset>[];
-    var depthSum = 0.0;
+  final px = List<double>.filled(8, 0);
+  final py = List<double>.filled(8, 0);
+  final pz = List<double>.filled(8, 0);
+
+  var fid = 0;
+  for (final f in _buildFaces(project)) {
+    fid++;
+    final m = f.points.length;
     var ok = true;
-    for (final wp in f.points) {
-      final v = viewModel.transformed3(wp);
-      depthSum += v.z;
+    for (var i = 0; i < m; i++) {
+      final wp = f.points[i];
       final clip = mvp.transform(vm.Vector4(wp.x, wp.y, wp.z, 1));
       if (clip.w <= 1e-6) {
-        ok = false; // behind (or on) the camera — skip
+        ok = false; // behind the camera
         break;
       }
-      final sx = (clip.x / clip.w + 1) / 2 * size.width;
-      final sy = (1 - (clip.y / clip.w + 1) / 2) * size.height;
-      // Magnify about the view centre.
-      screen.add(Offset(cx + (sx - cx) * z, cy + (sy - cy) * z));
+      final sx = (clip.x / clip.w + 1) / 2 * w;
+      final sy = (1 - (clip.y / clip.w + 1) / 2) * h;
+      px[i] = ccx + (sx - ccx) * zoom;
+      py[i] = ccy + (sy - ccy) * zoom;
+      pz[i] = clip.w; // nearer = smaller
     }
     if (!ok) continue;
-    final base = f.color;
-    final color = Color.from(
-      alpha: xray ? 0.34 : 1.0,
-      red: base.r * f.shade,
-      green: base.g * f.shade,
-      blue: base.b * f.shade,
-    );
-    out.add(_Projected(
-        screen, depthSum / f.points.length, color, f.ringIndex, f.edgeVis));
-  }
-  return out;
-}
 
-bool _polyContains(List<Offset> poly, Offset p) {
-  var inside = false;
-  for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    final a = poly[i], b = poly[j];
-    if (((a.dy > p.dy) != (b.dy > p.dy)) &&
-        (p.dx < (b.dx - a.dx) * (p.dy - a.dy) / (b.dy - a.dy) + a.dx)) {
-      inside = !inside;
+    final c = f.color;
+    final r = (c.r * f.shade * 255).round().clamp(0, 255);
+    final g = (c.g * f.shade * 255).round().clamp(0, 255);
+    final b = (c.b * f.shade * 255).round().clamp(0, 255);
+    final ring1 = f.ringIndex + 1;
+    for (var k = 1; k < m - 1; k++) {
+      _rasterTri(w, h, px[0], py[0], pz[0], px[k], py[k], pz[k], px[k + 1],
+          py[k + 1], pz[k + 1], r, g, b, fid, ring1, rgba, depth, faceId, ringId);
     }
   }
-  return inside;
+
+  _edgePass(w, h, rgba, faceId, ringId,
+      highlightRingIndex == null ? -1 : highlightRingIndex + 1);
+
+  final completer = Completer<RasterResult?>();
+  ui.decodeImageFromPixels(rgba, w, h, ui.PixelFormat.rgba8888,
+      (img) => completer.complete(RasterResult._(img, w, h, ringId)));
+  return completer.future;
 }
 
-/// The ring id under [offset] in the 3D view, or null.
-String? pickRingId(BowlProject project, Camera3D camera, Size size, Offset offset) {
-  if (project.rings.isEmpty) return null;
-  final projected = _projectScene(project, camera, size, false);
-  // Nearest faces are last in draw order; test them first.
-  for (final f in projected.reversed) {
-    if (_polyContains(f.pts, offset)) {
-      return project.rings[f.ringIndex].id;
-    }
-  }
-  return null;
-}
+void _rasterTri(
+  int w,
+  int h,
+  double ax,
+  double ay,
+  double az,
+  double bx,
+  double by,
+  double bz,
+  double cx,
+  double cy,
+  double cz,
+  int r,
+  int g,
+  int b,
+  int fid,
+  int ring1,
+  Uint8List rgba,
+  Float32List depth,
+  Int32List faceId,
+  Int32List ringId,
+) {
+  var minX = math.min(ax, math.min(bx, cx)).floor();
+  var maxX = math.max(ax, math.max(bx, cx)).ceil();
+  var minY = math.min(ay, math.min(by, cy)).floor();
+  var maxY = math.max(ay, math.max(by, cy)).ceil();
+  if (minX < 0) minX = 0;
+  if (minY < 0) minY = 0;
+  if (maxX > w - 1) maxX = w - 1;
+  if (maxY > h - 1) maxY = h - 1;
+  if (minX > maxX || minY > maxY) return;
 
-/// Renders the bowl mesh with perspective, depth sorting, and shading.
-class BowlScenePainter extends CustomPainter {
-  BowlScenePainter({
-    required this.project,
-    required this.camera,
-    required this.edgeColor,
-    this.highlightRingIndex,
-  });
+  final d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+  if (d.abs() < 1e-9) return;
+  final invd = 1 / d;
 
-  final BowlProject project;
-  final Camera3D camera;
-  final Color edgeColor;
-  final int? highlightRingIndex;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (project.rings.isEmpty) return;
-    final drawable = _projectScene(project, camera, size, false);
-
-    final fill = Paint()..style = PaintingStyle.fill;
-    final stroke = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.6
-      ..color = edgeColor.withValues(alpha: 0.28);
-    final hi = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6
-      ..color = const Color(0xFFD9A441);
-
-    for (final d in drawable) {
-      final path = Path()..addPolygon(d.pts, true);
-      fill.color = d.color;
-      canvas.drawPath(path, fill);
-      // Stroke only original segment boundaries, not BSP split seams.
-      final edge = d.ringIndex == highlightRingIndex ? hi : stroke;
-      for (var i = 0; i < d.pts.length; i++) {
-        if (!d.edgeVisible(i)) continue;
-        canvas.drawLine(d.pts[i], d.pts[(i + 1) % d.pts.length], edge);
+  for (var y = minY; y <= maxY; y++) {
+    final fy = y + 0.5;
+    for (var x = minX; x <= maxX; x++) {
+      final fx = x + 0.5;
+      final l1 = ((by - cy) * (fx - cx) + (cx - bx) * (fy - cy)) * invd;
+      if (l1 < 0) continue;
+      final l2 = ((cy - ay) * (fx - cx) + (ax - cx) * (fy - cy)) * invd;
+      if (l2 < 0) continue;
+      final l3 = 1 - l1 - l2;
+      if (l3 < 0) continue;
+      final zz = l1 * az + l2 * bz + l3 * cz;
+      final idx = y * w + x;
+      if (zz < depth[idx]) {
+        depth[idx] = zz;
+        final o = idx * 4;
+        rgba[o] = r;
+        rgba[o + 1] = g;
+        rgba[o + 2] = b;
+        rgba[o + 3] = 255;
+        faceId[idx] = fid;
+        ringId[idx] = ring1;
       }
     }
   }
+}
 
-  @override
-  bool shouldRepaint(covariant BowlScenePainter old) =>
-      old.project != project ||
-      old.camera.yaw != camera.yaw ||
-      old.camera.pitch != camera.pitch ||
-      old.camera.zoom != camera.zoom ||
-      old.highlightRingIndex != highlightRingIndex;
+/// Draw 1px boundaries between faces: a darker seam between segments and the
+/// accent colour along the highlighted ring — recovering the crisp outlined
+/// look on top of the z-buffered fills.
+void _edgePass(int w, int h, Uint8List rgba, Int32List faceId, Int32List ringId,
+    int hiRing) {
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      final idx = y * w + x;
+      final fidHere = faceId[idx];
+      if (fidHere == 0) continue; // background
+      var edge = false;
+      var accent = false;
+      if (x + 1 < w && faceId[idx + 1] != fidHere) {
+        edge = true;
+        if (ringId[idx] == hiRing || ringId[idx + 1] == hiRing) accent = true;
+      }
+      if (!edge && x > 0 && faceId[idx - 1] != fidHere) {
+        edge = true;
+        if (ringId[idx] == hiRing || ringId[idx - 1] == hiRing) accent = true;
+      }
+      if (!edge && y + 1 < h && faceId[idx + w] != fidHere) {
+        edge = true;
+        if (ringId[idx] == hiRing || ringId[idx + w] == hiRing) accent = true;
+      }
+      if (!edge && y > 0 && faceId[idx - w] != fidHere) {
+        edge = true;
+        if (ringId[idx] == hiRing || ringId[idx - w] == hiRing) accent = true;
+      }
+      if (!edge) continue;
+      final o = idx * 4;
+      if (accent) {
+        rgba[o] = 0xD9;
+        rgba[o + 1] = 0xA4;
+        rgba[o + 2] = 0x41;
+      } else {
+        rgba[o] = (rgba[o] * 0.5).round();
+        rgba[o + 1] = (rgba[o + 1] * 0.5).round();
+        rgba[o + 2] = (rgba[o + 2] * 0.5).round();
+      }
+      rgba[o + 3] = 255;
+    }
+  }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/bowl_project.dart';
 import '../../rendering/cross_section_painter.dart';
 import '../../rendering/elevation_painter.dart';
 import '../../rendering/scene_3d.dart';
@@ -28,6 +29,41 @@ class ViewArea extends ConsumerStatefulWidget {
 class _ViewAreaState extends ConsumerState<ViewArea> {
   BowlView _view = BowlView.side; // Opens on Side elevation.
   Camera3D _camera = const Camera3D();
+
+  // Latest z-buffered 3D frame plus bookkeeping so we only re-render when the
+  // camera, size, geometry, or selection actually changed.
+  RasterResult? _raster3d;
+  String _rasterKey = '';
+  int _rasterToken = 0;
+
+  @override
+  void dispose() {
+    _raster3d?.dispose();
+    super.dispose();
+  }
+
+  /// Kick off an async z-buffer render if inputs changed; setState when ready.
+  void _maybeRenderRaster(
+      BowlProject project, int? highlightRingIndex, Size size) {
+    final key = '${project.hashCode}|$highlightRingIndex|'
+        '${size.width.round()}x${size.height.round()}|'
+        '${_camera.yaw.toStringAsFixed(4)},${_camera.pitch.toStringAsFixed(4)},'
+        '${_camera.zoom.toStringAsFixed(4)}';
+    if (key == _rasterKey) return;
+    _rasterKey = key;
+    final token = ++_rasterToken;
+    rasterizeScene(project, _camera, size, highlightRingIndex: highlightRingIndex)
+        .then((r) {
+      if (!mounted || token != _rasterToken) {
+        r?.dispose();
+        return;
+      }
+      setState(() {
+        _raster3d?.dispose();
+        _raster3d = r;
+      });
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -134,6 +170,8 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
     return LayoutBuilder(
       builder: (context, cons) {
         final size = Size(cons.maxWidth, cons.maxHeight);
+        _maybeRenderRaster(project, hiIndex < 0 ? null : hiIndex, size);
+        final raster = _raster3d;
         return Stack(
           children: [
             Positioned.fill(
@@ -147,9 +185,11 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTapUp: (d) {
-                    final id = pickRingId(project, _camera, size, d.localPosition);
-                    if (id != null) {
-                      ref.read(selectionControllerProvider.notifier).select(id);
+                    final idx = raster?.ringIndexAt(d.localPosition, size);
+                    if (idx != null && idx >= 0 && idx < project.rings.length) {
+                      ref
+                          .read(selectionControllerProvider.notifier)
+                          .select(project.rings[idx].id);
                     }
                   },
                   onScaleStart: (_) {},
@@ -164,15 +204,13 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
                       }
                     });
                   },
-                  child: CustomPaint(
-                    painter: BowlScenePainter(
-                      project: project,
-                      camera: _camera,
-                      edgeColor: const Color(0xFF000000),
-                      highlightRingIndex: hiIndex < 0 ? null : hiIndex,
-                    ),
-                    child: const SizedBox.expand(),
-                  ),
+                  child: raster == null
+                      ? const SizedBox.expand()
+                      : RawImage(
+                          image: raster.image,
+                          fit: BoxFit.fill,
+                          filterQuality: FilterQuality.medium,
+                        ),
                 ),
               ),
             ),
