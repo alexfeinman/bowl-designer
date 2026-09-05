@@ -37,6 +37,16 @@ class ProjectIo {
     );
   }
 
+  /// Save cut-list PDF [bytes] to a file. Returns true if written.
+  static Future<bool> exportPdf(List<int> bytes, String projectName) async {
+    return saveBytes(
+      '${_sanitize(projectName)}-cutlist.pdf',
+      bytes,
+      typeLabel: 'PDF',
+      extensions: const ['pdf'],
+    );
+  }
+
   /// Prompt for a `.sbowl`/JSON file and parse it. Null if cancelled.
   static Future<BowlProject?> open() async {
     final file = await openFile(

@@ -41,6 +41,9 @@ dependencies:
   vector_math: ^2.1.4
   # Cut-list CSV export.
   csv: ^6.0.0
+  # PDF cut-list generation and printing (web + desktop).
+  pdf: ^3.11.1
+  printing: ^5.13.2
   # Cross-platform save/open of project JSON and CSV (web + desktop).
   file_selector: ^1.0.3
   # Typeface loading (Fraunces / Archivo / JetBrains Mono).

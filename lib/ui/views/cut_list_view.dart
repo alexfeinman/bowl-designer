@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:printing/printing.dart';
 
 import '../../export/cut_list_csv.dart';
+import '../../export/cut_list_pdf.dart';
 import '../../geometry/ring_geometry.dart';
 import '../../models/units.dart';
 import '../../state/project_controller.dart';
@@ -48,11 +50,27 @@ class CutListView extends ConsumerWidget {
               Text('${specs.length} courses · ${project.totalSegments} segments',
                   style: AppFonts.ui(TextStyle(fontSize: 12, color: c.muted))),
               const Spacer(),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: c.ink, side: BorderSide(color: c.borderStrong)),
+                icon: const Icon(Icons.print, size: 16),
+                label: const Text('Print'),
+                onPressed: () => _print(ref),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: c.ink, side: BorderSide(color: c.borderStrong)),
+                icon: const Icon(Icons.picture_as_pdf, size: 16),
+                label: const Text('PDF'),
+                onPressed: () => _exportPdf(context, ref),
+              ),
+              const SizedBox(width: 8),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
                     backgroundColor: c.accent, foregroundColor: c.accentInk),
                 icon: const Icon(Icons.download, size: 16),
-                label: const Text('Export CSV'),
+                label: const Text('CSV'),
                 onPressed: () => _export(context, ref),
               ),
             ],
@@ -126,6 +144,33 @@ class CutListView extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cut list exported.')),
       );
+    }
+  }
+
+  /// Open the system print dialog (browser print on web) with the PDF cut list.
+  Future<void> _print(WidgetRef ref) async {
+    final project = ref.read(projectProvider);
+    await Printing.layoutPdf(
+      name: '${project.name} cut list',
+      onLayout: (format) => buildCutListPdf(project),
+    );
+  }
+
+  Future<void> _exportPdf(BuildContext context, WidgetRef ref) async {
+    final project = ref.read(projectProvider);
+    try {
+      final bytes = await buildCutListPdf(project);
+      final ok = await ProjectIo.exportPdf(bytes, project.name);
+      if (context.mounted && ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cut list PDF saved.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('PDF export failed: $e')));
+      }
     }
   }
 }
