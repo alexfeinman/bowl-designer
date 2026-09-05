@@ -62,7 +62,9 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
     final project = ref.watch(projectProvider);
     final unit = ref.watch(displayUnitProvider);
     final selId = ref.watch(selectedRingIdProvider);
-    final showGrid = ref.watch(gridVisibleProvider);
+    // Grid is a Side-elevation aid only; the X-ray never draws one.
+    final gridAllowed = !xray;
+    final showGrid = gridAllowed && ref.watch(gridVisibleProvider);
     return LayoutBuilder(
       builder: (context, cons) {
         final size = Size(cons.maxWidth, cons.maxHeight);
@@ -108,14 +110,16 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
                   text: xray
                       ? 'X-RAY · FINISHED WALL PROFILE · CLICK TO SELECT'
                       : 'SIDE ELEVATION · SEGMENTS · CLICK TO SELECT'),
-              Positioned(
-                right: 12,
-                bottom: 12,
-                child: _GridToggle(
-                  on: showGrid,
-                  onTap: () => ref.read(gridVisibleProvider.notifier).state = !showGrid,
+              if (gridAllowed)
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: _GridToggle(
+                    on: showGrid,
+                    onTap: () =>
+                        ref.read(gridVisibleProvider.notifier).state = !showGrid,
+                  ),
                 ),
-              ),
             ],
           ),
         );

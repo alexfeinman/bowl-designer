@@ -230,7 +230,12 @@ class CrossSectionPainter extends CustomPainter {
     final inner = smooth(moving(floor, false));
     for (var i = 0; i < outer.length; i++) {
       outer[i] = math.min(outer[i], ceil[i]); // stay inside the blocks
-      inner[i] = inner[i].clamp(math.max(0.0, floor[i]), math.max(0.0, outer[i] - 1));
+      // The finished bore must clear the widest block bore here yet stay inside
+      // the outer silhouette. Where a narrow ring below leaves no material, the
+      // bore meets the wall (zero thickness). Written with min/max — never
+      // num.clamp, whose lower>upper case throws (base disk vs. wider bores).
+      final bore = math.max(0.0, floor[i]);
+      inner[i] = math.min(math.max(inner[i], bore), outer[i]);
     }
 
     final outerPts = [for (var i = 0; i < ys.length; i++) Offset(outer[i], ys[i])];
