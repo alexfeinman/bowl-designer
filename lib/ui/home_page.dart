@@ -8,6 +8,7 @@ import '../models/bowl_project.dart';
 import '../models/units.dart';
 import '../state/project_controller.dart';
 import '../state/project_io.dart';
+import 'settings_page.dart';
 import 'shortcuts.dart';
 import 'theme.dart';
 import 'views/view_area.dart';
@@ -150,6 +151,13 @@ class _TopBar extends ConsumerWidget {
             enabled: true,
             onTap: () => ref.read(themeModeProvider.notifier).state =
                 mode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark,
+          ),
+          _IconBtn(
+            icon: Icons.settings_outlined,
+            tooltip: 'Settings',
+            enabled: true,
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const SettingsPage())),
           ),
           const SizedBox(width: 8),
           OutlinedButton.icon(

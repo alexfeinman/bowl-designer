@@ -20,6 +20,10 @@ final viewMaximizedProvider = StateProvider<bool>((ref) => false);
 /// Off by default.
 final gridVisibleProvider = StateProvider<bool>((ref) => false);
 
+/// Whether the 3D view is supersampled (antialiased). Off by default — it is
+/// ~4× the render work. Exposed in the Settings screen.
+final antialias3dProvider = StateProvider<bool>((ref) => false);
+
 class ViewArea extends ConsumerStatefulWidget {
   const ViewArea({super.key});
   @override
@@ -43,16 +47,19 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
   }
 
   /// Kick off an async z-buffer render if inputs changed; setState when ready.
-  void _maybeRenderRaster(
-      BowlProject project, int? highlightRingIndex, Size size) {
+  void _maybeRenderRaster(BowlProject project, int? highlightRingIndex,
+      Size size, double dpr, bool antialias) {
     final key = '${project.hashCode}|$highlightRingIndex|'
-        '${size.width.round()}x${size.height.round()}|'
+        '${size.width.round()}x${size.height.round()}@$dpr|aa=$antialias|'
         '${_camera.yaw.toStringAsFixed(4)},${_camera.pitch.toStringAsFixed(4)},'
         '${_camera.zoom.toStringAsFixed(4)}';
     if (key == _rasterKey) return;
     _rasterKey = key;
     final token = ++_rasterToken;
-    rasterizeScene(project, _camera, size, highlightRingIndex: highlightRingIndex)
+    rasterizeScene(project, _camera, size,
+            highlightRingIndex: highlightRingIndex,
+            pixelRatio: dpr,
+            antialias: antialias)
         .then((r) {
       if (!mounted || token != _rasterToken) {
         r?.dispose();
@@ -166,11 +173,14 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
   Widget _threeD() {
     final project = ref.watch(projectProvider);
     final selId = ref.watch(selectedRingIdProvider);
+    final antialias = ref.watch(antialias3dProvider);
     final hiIndex = project.rings.indexWhere((r) => r.id == selId);
+    final dpr = MediaQuery.of(context).devicePixelRatio;
     return LayoutBuilder(
       builder: (context, cons) {
         final size = Size(cons.maxWidth, cons.maxHeight);
-        _maybeRenderRaster(project, hiIndex < 0 ? null : hiIndex, size);
+        _maybeRenderRaster(
+            project, hiIndex < 0 ? null : hiIndex, size, dpr, antialias);
         final raster = _raster3d;
         return Stack(
           children: [

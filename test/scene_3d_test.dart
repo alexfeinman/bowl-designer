@@ -24,6 +24,22 @@ void main() {
       }
     });
 
+    test('antialiased render supersamples then downsamples to the target size',
+        () async {
+      final project = BowlProject.sample();
+      final plain = await rasterizeScene(
+          project, const Camera3D(), const ui.Size(200, 150),
+          pixelRatio: 1);
+      final aa = await rasterizeScene(
+          project, const Camera3D(), const ui.Size(200, 150),
+          pixelRatio: 1, antialias: true);
+      // Same displayed dimensions; AA just renders at higher internal res.
+      expect(aa!.image.width, plain!.image.width);
+      expect(aa.image.height, plain.image.height);
+      plain.dispose();
+      aa.dispose();
+    });
+
     test('hit-test maps a pixel to a ring or empty space', () async {
       final project = BowlProject.sample();
       final r = await rasterizeScene(

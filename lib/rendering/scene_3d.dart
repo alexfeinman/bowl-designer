@@ -166,15 +166,25 @@ Future<RasterResult?> rasterizeScene(
   Camera3D camera,
   Size size, {
   int? highlightRingIndex,
+  double pixelRatio = 1.0,
+  bool antialias = false,
 }) {
   if (project.rings.isEmpty || size.width < 2 || size.height < 2) {
     return Future.value(null);
   }
-  // Cap the internal resolution; the image is stretched to the pane on display.
-  const maxDim = 900.0;
-  final resScale = math.min(1.0, maxDim / math.max(size.width, size.height));
-  final w = math.max(2, (size.width * resScale).round());
-  final h = math.max(2, (size.height * resScale).round());
+  // Render at the pane's true device-pixel size so displayed 1:1 (crisp edges).
+  // A generous cap only guards pathologically large / high-DPI windows.
+  // With antialiasing we supersample by ss and box-downsample, so bound the
+  // *super* resolution — the displayed image ends up ss× smaller than that.
+  final ss = antialias ? 2 : 1;
+  const maxDim = 2600.0;
+  final cap = maxDim / ss;
+  final tw = size.width * pixelRatio;
+  final th = size.height * pixelRatio;
+  final resScale = math.min(1.0, cap / math.max(tw, th));
+  final w = math.max(2, (tw * resScale).round()); // displayed dims
+  final h = math.max(2, (th * resScale).round());
+  final sw = w * ss, sh = h * ss; // super-sampled render dims
 
   final radius = project.maxOuterDiameterMm / 2;
   final extent = math.max(radius, project.totalHeightMm / 2) * 2.2;
@@ -185,11 +195,12 @@ Future<RasterResult?> rasterizeScene(
     ..rotateY(camera.yaw);
   final view = vm.makeViewMatrix(
       vm.Vector3(0, 0, camDist), vm.Vector3.zero(), vm.Vector3(0, 1, 0));
-  final proj = vm.makePerspectiveMatrix(45 * math.pi / 180, w / h, 1, extent * 6);
+  final proj =
+      vm.makePerspectiveMatrix(45 * math.pi / 180, sw / sh, 1, extent * 6);
   final mvp = proj * (view * model);
-  final ccx = w / 2, ccy = h / 2, zoom = camera.zoom;
+  final ccx = sw / 2, ccy = sh / 2, zoom = camera.zoom;
 
-  final n = w * h;
+  final n = sw * sh;
   final rgba = Uint8List(n * 4);
   final depth = Float32List(n)..fillRange(0, n, 1e30);
   final faceId = Int32List(n);
@@ -211,8 +222,8 @@ Future<RasterResult?> rasterizeScene(
         ok = false; // behind the camera
         break;
       }
-      final sx = (clip.x / clip.w + 1) / 2 * w;
-      final sy = (1 - (clip.y / clip.w + 1) / 2) * h;
+      final sx = (clip.x / clip.w + 1) / 2 * sw;
+      final sy = (1 - (clip.y / clip.w + 1) / 2) * sh;
       px[i] = ccx + (sx - ccx) * zoom;
       py[i] = ccy + (sy - ccy) * zoom;
       pz[i] = clip.w; // nearer = smaller
@@ -225,17 +236,50 @@ Future<RasterResult?> rasterizeScene(
     final b = (c.b * f.shade * 255).round().clamp(0, 255);
     final ring1 = f.ringIndex + 1;
     for (var k = 1; k < m - 1; k++) {
-      _rasterTri(w, h, px[0], py[0], pz[0], px[k], py[k], pz[k], px[k + 1],
+      _rasterTri(sw, sh, px[0], py[0], pz[0], px[k], py[k], pz[k], px[k + 1],
           py[k + 1], pz[k + 1], r, g, b, fid, ring1, rgba, depth, faceId, ringId);
     }
   }
 
-  _edgePass(w, h, rgba, faceId, ringId,
+  _edgePass(sw, sh, rgba, faceId, ringId,
       highlightRingIndex == null ? -1 : highlightRingIndex + 1);
 
+  // Downsample the super-res colour to the display buffer (box filter); sample
+  // the ring-id map at the block centre for hit-testing.
+  final Uint8List outRgba;
+  final Int32List outRing;
+  if (ss == 1) {
+    outRgba = rgba;
+    outRing = ringId;
+  } else {
+    outRgba = Uint8List(w * h * 4);
+    outRing = Int32List(w * h);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var rr = 0, gg = 0, bb = 0, aa = 0;
+        for (var dy = 0; dy < ss; dy++) {
+          for (var dx = 0; dx < ss; dx++) {
+            final si = ((y * ss + dy) * sw + (x * ss + dx)) * 4;
+            rr += rgba[si];
+            gg += rgba[si + 1];
+            bb += rgba[si + 2];
+            aa += rgba[si + 3];
+          }
+        }
+        final cnt = ss * ss;
+        final o = (y * w + x) * 4;
+        outRgba[o] = rr ~/ cnt;
+        outRgba[o + 1] = gg ~/ cnt;
+        outRgba[o + 2] = bb ~/ cnt;
+        outRgba[o + 3] = aa ~/ cnt;
+        outRing[y * w + x] = ringId[(y * ss) * sw + (x * ss)];
+      }
+    }
+  }
+
   final completer = Completer<RasterResult?>();
-  ui.decodeImageFromPixels(rgba, w, h, ui.PixelFormat.rgba8888,
-      (img) => completer.complete(RasterResult._(img, w, h, ringId)));
+  ui.decodeImageFromPixels(outRgba, w, h, ui.PixelFormat.rgba8888,
+      (img) => completer.complete(RasterResult._(img, w, h, outRing)));
   return completer.future;
 }
 
