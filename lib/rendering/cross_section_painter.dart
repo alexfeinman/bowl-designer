@@ -171,33 +171,35 @@ class CrossSectionPainter extends CustomPainter {
     }
   }
 
-  /// Draw the x-ray: the finished bowl WALL (both turned surfaces) as a smooth
-  /// profile through the ring cross-sections. The outer surface passes through
-  /// each ring's outer radius and the inner through each bore, interpolated with
-  /// a monotone cubic so the wall reads as one fair curve rather than the block
-  /// staircase; the bore closes to the base so the vessel has a solid bottom.
-  /// [bands] entries are [top, bottom, outerR, innerR] in screen px, base first.
+  /// Draw the x-ray: the finished bowl WALL (both turned surfaces) as the
+  /// *largest smooth wall that actually fits inside the segment blocks* — the
+  /// outer surface is the smoothest curve that never exceeds any ring's outer
+  /// radius, the bore the smoothest curve that never cuts inside any block bore.
+  /// Where the rings don't stack into a fair curve the wall shows the flats /
+  /// scallops it is forced into, so the turner can nudge ring diameters until
+  /// the fitted wall reads smooth. [bands] entries are [top, bottom, outerR,
+  /// innerR] in screen px, base first.
   void _paintProfileWireframe(Canvas canvas, double cx, List<List<double>> bands) {
     if (bands.isEmpty) return;
     final topRim = bands.last[0];
     final baseBottom = bands.first[1];
 
-    // Control points at each ring's vertical centre, ordered top -> bottom.
-    final cy = <double>[];
-    final co = <double>[]; // outer radius
-    final ci = <double>[]; // bore radius
-    for (final b in bands.reversed) {
-      cy.add((b[0] + b[1]) / 2);
-      co.add(b[2]);
-      ci.add(b[3]);
+    double blockR(double y, int idx) {
+      for (final b in bands) {
+        if (y >= b[0] - 0.5 && y <= b[1] + 0.5) return b[idx];
+      }
+      return y < topRim ? bands.last[idx] : bands.first[idx];
     }
 
     const n = 240;
     final ys = [for (var i = 0; i <= n; i++) topRim + (baseBottom - topRim) * i / n];
-    final outer = _monotone(cy, co, ys);
-    final inner = _monotone(cy, ci, ys);
+    final ceil = [for (final y in ys) blockR(y, 2)]; // block outer radii
+    final floor = [for (final y in ys) blockR(y, 3)]; // block bore radii
+
+    final outer = _fitInside(ceil, ceiling: true);
+    final inner = _fitInside(floor, ceiling: false);
     for (var i = 0; i < ys.length; i++) {
-      // Keep the bore inside the wall so the fill never inverts.
+      // Bore stays inside the wall so the fill never inverts.
       inner[i] = math.min(math.max(0.0, inner[i]), outer[i]);
     }
 
@@ -244,60 +246,29 @@ class CrossSectionPainter extends CustomPainter {
         Offset(cx - outer.first, topRim), outerStroke);
   }
 
-  /// Monotone cubic Hermite (Fritsch–Carlson) interpolation of the values [vs]
-  /// sampled at ascending knots [xs], evaluated at each query in [qs]. Produces
-  /// a smooth curve with no overshoot beyond the data, and holds the endpoint
-  /// value outside the knot range (flat rim opening / base).
-  List<double> _monotone(List<double> xs, List<double> vs, List<double> qs) {
-    final k = xs.length;
-    if (k == 0) return [for (final _ in qs) 0.0];
-    if (k == 1) return [for (final _ in qs) vs[0]];
-
-    final d = List<double>.filled(k - 1, 0); // secant slopes
-    for (var i = 0; i < k - 1; i++) {
-      final dx = xs[i + 1] - xs[i];
-      d[i] = dx == 0 ? 0 : (vs[i + 1] - vs[i]) / dx;
-    }
-    final m = List<double>.filled(k, 0); // tangents
-    m[0] = d[0];
-    m[k - 1] = d[k - 2];
-    for (var i = 1; i < k - 1; i++) {
-      m[i] = d[i - 1] * d[i] <= 0 ? 0.0 : (d[i - 1] + d[i]) / 2;
-    }
-    for (var i = 0; i < k - 1; i++) {
-      if (d[i] == 0) {
-        m[i] = 0;
-        m[i + 1] = 0;
-        continue;
+  /// The smoothest curve that stays inside a one-sided constraint: with
+  /// [ceiling] true it never exceeds [bound] (the block outer radii); false it
+  /// never drops below [bound] (the block bores). Found by relaxed Jacobi
+  /// diffusion re-projected onto the constraint each pass — the curve rounds
+  /// wherever it can and rests against the binding rings where it must, so a
+  /// well-stacked bowl yields a fair curve and a poorly stacked one shows the
+  /// scallops. Result is guaranteed on the safe side of [bound] everywhere.
+  List<double> _fitInside(List<double> bound, {required bool ceiling}) {
+    final v = List<double>.from(bound);
+    const passes = 120;
+    const relax = 0.5;
+    for (var p = 0; p < passes; p++) {
+      final prev = List<double>.from(v);
+      for (var i = 1; i < v.length - 1; i++) {
+        final avg = (prev[i - 1] + prev[i + 1]) / 2;
+        v[i] = prev[i] + relax * (avg - prev[i]);
       }
-      final a = m[i] / d[i];
-      final b = m[i + 1] / d[i];
-      final s = a * a + b * b;
-      if (s > 9) {
-        final t = 3 / math.sqrt(s);
-        m[i] = t * a * d[i];
-        m[i + 1] = t * b * d[i];
+      // Re-project onto the constraint so the wall always fits the blocks.
+      for (var i = 0; i < v.length; i++) {
+        v[i] = ceiling ? math.min(v[i], bound[i]) : math.max(v[i], bound[i]);
       }
     }
-
-    return [
-      for (final q in qs)
-        () {
-          if (q <= xs[0]) return vs[0];
-          if (q >= xs[k - 1]) return vs[k - 1];
-          var i = 0;
-          while (i < k - 1 && q > xs[i + 1]) {
-            i++;
-          }
-          final h = xs[i + 1] - xs[i];
-          final t = (q - xs[i]) / h;
-          final t2 = t * t, t3 = t2 * t;
-          return (2 * t3 - 3 * t2 + 1) * vs[i] +
-              (t3 - 2 * t2 + t) * h * m[i] +
-              (-2 * t3 + 3 * t2) * vs[i + 1] +
-              (t3 - t2) * h * m[i + 1];
-        }()
-    ];
+    return v;
   }
 
   void _dashedLine(Canvas c, Offset a, Offset b, Paint p) {
