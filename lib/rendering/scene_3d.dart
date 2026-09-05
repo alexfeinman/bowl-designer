@@ -24,21 +24,30 @@ class Camera3D {
 }
 
 /// A flat, colored polygon in world space (mm), tagged with its ring index.
+/// [edgeVis] marks, per edge i (points[i] -> points[i+1]), whether it is an
+/// original segment boundary (true) or a seam introduced by BSP splitting
+/// (false); null means every edge is original.
 class _Face {
-  _Face(this.points, this.color, this.shade, this.ringIndex);
+  _Face(this.points, this.color, this.shade, this.ringIndex, [this.edgeVis]);
   final List<vm.Vector3> points;
   final Color color;
   final double shade;
   final int ringIndex;
+  final List<bool>? edgeVis;
+
+  bool edgeVisible(int i) => edgeVis == null || edgeVis![i];
 }
 
 /// A projected, shaded face ready to draw or hit-test.
 class _Projected {
-  _Projected(this.pts, this.depth, this.color, this.ringIndex);
+  _Projected(this.pts, this.depth, this.color, this.ringIndex, this.edgeVis);
   final List<Offset> pts;
   final double depth; // view-space z; larger (less negative) = nearer camera
   final Color color;
   final int ringIndex;
+  final List<bool>? edgeVis;
+
+  bool edgeVisible(int i) => edgeVis == null || edgeVis![i];
 }
 
 const _light = [0.35, 0.82, 0.45];
@@ -113,6 +122,145 @@ void _addFace(List<_Face> faces, List<vm.Vector3> pts, Color color, int ri) {
 Color _lighten(Color c, double t) => Color.lerp(c, const Color(0xFFFFFFFF), t)!;
 Color _darken(Color c, double t) => Color.lerp(c, const Color(0xFF000000), t)!;
 
+// ---------------------------------------------------------------------------
+// BSP tree — exact hidden-surface ordering.
+//
+// Depth-sorting whole faces (painter's algorithm) can't resolve faces that
+// overlap in screen space at different depths, so a low ring's top face could
+// paint over the walls in front of it. A BSP tree splits any face that
+// straddles another's plane and, for a given eye, yields a provably correct
+// back-to-front draw order. It's built once per geometry (cached) and only the
+// traversal depends on the camera.
+// ---------------------------------------------------------------------------
+
+const double _bspEps = 1e-4;
+
+class _Plane {
+  _Plane(this.n, this.d);
+  final vm.Vector3 n;
+  final double d;
+  double side(vm.Vector3 p) => n.dot(p) - d;
+}
+
+_Plane _planeOf(List<vm.Vector3> pts) {
+  final n = (pts[1] - pts[0]).cross(pts[2] - pts[0])..normalize();
+  return _Plane(n, n.dot(pts[0]));
+}
+
+class _BspNode {
+  _BspNode(this.plane);
+  final _Plane plane;
+  final List<_Face> coplanar = [];
+  _BspNode? front;
+  _BspNode? back;
+}
+
+/// Clip [face] to one half-space of [plane], keeping the front (side >= 0) when
+/// [keepFront], else the back. Carries edge-visibility through so the seam left
+/// along the cut plane is marked invisible while original boundaries are kept.
+_Face? _clip(_Face face, _Plane plane, List<double> sides, bool keepFront) {
+  final pts = <vm.Vector3>[];
+  final vis = <bool>[];
+  final s = keepFront ? 1.0 : -1.0; // orient tests so "inside" is side*s >= 0
+  final n = face.points.length;
+  for (var i = 0; i < n; i++) {
+    final j = (i + 1) % n;
+    final a = face.points[i], b = face.points[j];
+    final sa = sides[i] * s, sb = sides[j] * s;
+    final e = face.edgeVisible(i);
+    final aIn = sa >= -_bspEps;
+    final bIn = sb >= -_bspEps;
+    if (aIn) {
+      pts.add(a);
+      if (bIn) {
+        vis.add(e); // whole edge kept, still original
+      } else {
+        vis.add(e); // a -> intersection: original portion
+        final t = sides[i] / (sides[i] - sides[j]);
+        pts.add(a + (b - a) * t);
+        vis.add(false); // intersection -> next: the cut seam
+      }
+    } else if (bIn) {
+      final t = sides[i] / (sides[i] - sides[j]);
+      pts.add(a + (b - a) * t);
+      vis.add(e); // intersection -> b: original portion
+    }
+  }
+  if (pts.length < 3) return null;
+  return _Face(pts, face.color, face.shade, face.ringIndex, vis);
+}
+
+/// Classify [f] against [plane], adding it (whole or split) to the right bucket.
+void _classify(_Face f, _Plane plane, List<_Face> coplanar, List<_Face> front,
+    List<_Face> back) {
+  final sides = [for (final p in f.points) plane.side(p)];
+  var hasF = false, hasB = false;
+  for (final s in sides) {
+    if (s > _bspEps) hasF = true;
+    if (s < -_bspEps) hasB = true;
+  }
+  if (!hasF && !hasB) {
+    coplanar.add(f); // lies in the plane
+    return;
+  }
+  if (!hasB) {
+    front.add(f);
+    return;
+  }
+  if (!hasF) {
+    back.add(f);
+    return;
+  }
+  final fp = _clip(f, plane, sides, true);
+  final bp = _clip(f, plane, sides, false);
+  if (fp != null) front.add(fp);
+  if (bp != null) back.add(bp);
+}
+
+_BspNode? _buildBsp(List<_Face> faces) {
+  if (faces.isEmpty) return null;
+  final node = _BspNode(_planeOf(faces[0].points));
+  node.coplanar.add(faces[0]);
+  final front = <_Face>[];
+  final back = <_Face>[];
+  for (var i = 1; i < faces.length; i++) {
+    _classify(faces[i], node.plane, node.coplanar, front, back);
+  }
+  node.front = _buildBsp(front);
+  node.back = _buildBsp(back);
+  return node;
+}
+
+/// Append faces to [out] in back-to-front order as seen from [eye].
+void _bspOrder(_BspNode? node, vm.Vector3 eye, List<_Face> out) {
+  if (node == null) return;
+  if (node.plane.side(eye) >= 0) {
+    _bspOrder(node.back, eye, out); // far half first
+    out.addAll(node.coplanar);
+    _bspOrder(node.front, eye, out);
+  } else {
+    _bspOrder(node.front, eye, out);
+    out.addAll(node.coplanar);
+    _bspOrder(node.back, eye, out);
+  }
+}
+
+// Cache the tree by project identity (immutable; edits produce a new instance).
+BowlProject? _cachedProject;
+_BspNode? _cachedTree;
+
+List<_Face> _orderedFaces(BowlProject project, vm.Matrix4 viewModel) {
+  if (!identical(project, _cachedProject)) {
+    _cachedTree = _buildBsp(_buildFaces(project));
+    _cachedProject = project;
+  }
+  // Eye position in geometry space = inverse(viewModel) applied to the origin.
+  final eye = (viewModel.clone()..invert()).transform3(vm.Vector3.zero());
+  final out = <_Face>[];
+  _bspOrder(_cachedTree, eye, out);
+  return out;
+}
+
 /// Project every face to screen space and shade it, nearest last (draw order).
 List<_Projected> _projectScene(
     BowlProject project, Camera3D camera, Size size, bool xray) {
@@ -130,8 +278,10 @@ List<_Projected> _projectScene(
   final viewModel = view * model;
   final mvp = proj * viewModel;
 
+  // Faces already come back in exact back-to-front order from the BSP tree, so
+  // no depth sorting (and no per-face heuristic) is needed — just project them.
   final out = <_Projected>[];
-  for (final f in _buildFaces(project)) {
+  for (final f in _orderedFaces(project, viewModel)) {
     final screen = <Offset>[];
     var depthSum = 0.0;
     var ok = true;
@@ -156,23 +306,9 @@ List<_Projected> _projectScene(
       green: base.g * f.shade,
       blue: base.b * f.shade,
     );
-    out.add(_Projected(screen, depthSum / f.points.length, color, f.ringIndex));
+    out.add(_Projected(
+        screen, depthSum / f.points.length, color, f.ringIndex, f.edgeVis));
   }
-
-  // The rings are stacked along Y, so inter-course occlusion is decided by the
-  // stacking order as seen from the camera: whichever end of the stack is
-  // nearer must be painted last. Within a course, plain depth sorting works.
-  final topZ = viewModel.transformed3(vm.Vector3(0, project.totalHeightMm / 2, 0)).z;
-  final botZ = viewModel.transformed3(vm.Vector3(0, -project.totalHeightMm / 2, 0)).z;
-  final topNearer = topZ > botZ; // larger view-z = nearer the camera
-  out.sort((a, b) {
-    if (a.ringIndex != b.ringIndex) {
-      return topNearer
-          ? a.ringIndex.compareTo(b.ringIndex) // draw base first, rim last
-          : b.ringIndex.compareTo(a.ringIndex);
-    }
-    return a.depth.compareTo(b.depth); // within a course: farthest first
-  });
   return out;
 }
 
@@ -234,7 +370,12 @@ class BowlScenePainter extends CustomPainter {
       final path = Path()..addPolygon(d.pts, true);
       fill.color = d.color;
       canvas.drawPath(path, fill);
-      canvas.drawPath(path, d.ringIndex == highlightRingIndex ? hi : stroke);
+      // Stroke only original segment boundaries, not BSP split seams.
+      final edge = d.ringIndex == highlightRingIndex ? hi : stroke;
+      for (var i = 0; i < d.pts.length; i++) {
+        if (!d.edgeVisible(i)) continue;
+        canvas.drawLine(d.pts[i], d.pts[(i + 1) % d.pts.length], edge);
+      }
     }
   }
 
