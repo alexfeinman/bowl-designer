@@ -95,7 +95,7 @@ class BowlProject {
         ),
         Ring(
           id: 'r-c1',
-          name: 'Course 1',
+          name: 'Ring 1',
           type: RingType.normal,
           outerDiameter: 186,
           innerDiameter: 130,
@@ -105,7 +105,7 @@ class BowlProject {
         ),
         Ring(
           id: 'r-c2',
-          name: 'Course 2',
+          name: 'Ring 2',
           type: RingType.normal,
           outerDiameter: 220,
           innerDiameter: 170,
@@ -115,7 +115,7 @@ class BowlProject {
         ),
         Ring(
           id: 'r-c3',
-          name: 'Course 3',
+          name: 'Ring 3',
           type: RingType.normal,
           outerDiameter: 238,
           innerDiameter: 190,

@@ -12,7 +12,7 @@ String buildCutListCsv(BowlProject project) {
 
   final rows = <List<dynamic>>[
     [
-      'Course',
+      'Ring',
       'Type',
       'Segments',
       'Miter (°)',

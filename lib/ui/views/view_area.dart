@@ -15,6 +15,10 @@ enum BowlView { side, xray, threeD, cutList }
 /// 3D render can grow to the full app size instead of the centre pane.
 final viewMaximizedProvider = StateProvider<bool>((ref) => false);
 
+/// Whether the reference grid is drawn behind the 2D (Side / X-ray) views.
+/// Off by default.
+final gridVisibleProvider = StateProvider<bool>((ref) => false);
+
 class ViewArea extends ConsumerStatefulWidget {
   const ViewArea({super.key});
   @override
@@ -58,6 +62,7 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
     final project = ref.watch(projectProvider);
     final unit = ref.watch(displayUnitProvider);
     final selId = ref.watch(selectedRingIdProvider);
+    final showGrid = ref.watch(gridVisibleProvider);
     return LayoutBuilder(
       builder: (context, cons) {
         final size = Size(cons.maxWidth, cons.maxHeight);
@@ -75,6 +80,7 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
                 unit: unit,
                 highlightRingId: selId,
               );
+        final Widget canvas = CustomPaint(painter: painter);
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapUp: (d) {
@@ -88,18 +94,28 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
           child: Stack(
             children: [
               Positioned.fill(
-                child: GridPaper(
-                  color: c.grid,
-                  interval: 44,
-                  divisions: 2,
-                  subdivisions: 1,
-                  child: CustomPaint(painter: painter),
-                ),
+                child: showGrid
+                    ? GridPaper(
+                        color: c.grid,
+                        interval: 44,
+                        divisions: 2,
+                        subdivisions: 1,
+                        child: canvas,
+                      )
+                    : canvas,
               ),
               _ViewLabel(
                   text: xray
                       ? 'X-RAY · FINISHED WALL PROFILE · CLICK TO SELECT'
                       : 'SIDE ELEVATION · SEGMENTS · CLICK TO SELECT'),
+              Positioned(
+                right: 12,
+                bottom: 12,
+                child: _GridToggle(
+                  on: showGrid,
+                  onTap: () => ref.read(gridVisibleProvider.notifier).state = !showGrid,
+                ),
+              ),
             ],
           ),
         );
@@ -286,6 +302,44 @@ class _ViewLabel extends StatelessWidget {
           letterSpacing: 0.6,
           color: light ? Colors.white.withValues(alpha: 0.55) : c.faint,
         )),
+      ),
+    );
+  }
+}
+
+class _GridToggle extends StatelessWidget {
+  const _GridToggle({required this.on, required this.onTap});
+  final bool on;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Material(
+      color: on ? c.accentSoft : c.surface,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: on ? c.accent : c.borderStrong),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.grid_4x4, size: 15, color: on ? c.accent : c.muted),
+              const SizedBox(width: 6),
+              Text('Grid',
+                  style: AppFonts.ui(TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: on ? c.accent : c.muted,
+                  ))),
+            ],
+          ),
+        ),
       ),
     );
   }

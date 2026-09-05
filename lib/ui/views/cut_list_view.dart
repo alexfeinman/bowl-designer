@@ -47,7 +47,7 @@ class CutListView extends ConsumerWidget {
                   style: AppFonts.display(TextStyle(
                       fontSize: 17, fontWeight: FontWeight.w600, color: c.ink))),
               const SizedBox(width: 10),
-              Text('${specs.length} courses · ${project.totalSegments} segments',
+              Text('${specs.length} rings · ${project.totalSegments} segments',
                   style: AppFonts.ui(TextStyle(fontSize: 12, color: c.muted))),
               const Spacer(),
               OutlinedButton.icon(
@@ -90,7 +90,7 @@ class CutListView extends ConsumerWidget {
                   child: DataTable(
                     headingRowColor: WidgetStatePropertyAll(c.panel),
                     columns: [
-                      col('Course'),
+                      col('Ring'),
                       col('Type'),
                       col('Seg', numeric: true),
                       col('Miter', numeric: true),

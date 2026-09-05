@@ -96,7 +96,7 @@ class ProjectController extends Notifier<ProjectHistory> {
         );
     final newRing = base.copyWith(
       id: 'r-${DateTime.now().microsecondsSinceEpoch}',
-      name: 'Course ${project.rings.length + 1}',
+      name: 'Ring ${project.rings.length + 1}',
     );
     final rings = [...project.rings];
     final at = ref == null ? rings.length : rings.indexOf(ref) + 1;

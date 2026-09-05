@@ -258,7 +258,7 @@ class _Dimensions extends ConsumerWidget {
                     innerDiameter: mm.clamp(0.0, r.outerDiameter - 1))),
           ),
         _DimRow(
-          label: 'Thickness (course height)',
+          label: 'Thickness (ring height)',
           hint: '[ ]',
           valueMm: ring.thickness,
           unit: unit,

@@ -29,7 +29,7 @@ Future<Uint8List> buildCutListPdf(BowlProject project) async {
   const panel = PdfColor.fromInt(0xFFF0E3CC);
 
   final headers = [
-    'Course',
+    'Ring',
     'Type',
     'Seg',
     'Miter',
@@ -111,7 +111,7 @@ Future<Uint8List> buildCutListPdf(BowlProject project) async {
         pw.Wrap(children: [
           kv('Height', UnitFormat.withUnit(project.totalHeightMm, unit)),
           kv('Max ⌀', UnitFormat.withUnit(project.maxOuterDiameterMm, unit)),
-          kv('Courses', '${project.rings.length}'),
+          kv('Rings', '${project.rings.length}'),
           kv('Segments', '${project.totalSegments}'),
           kv('Board-feet', totalBf.toStringAsFixed(2)),
           kv('Units', unit.label),
