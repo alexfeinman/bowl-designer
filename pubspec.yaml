@@ -54,6 +54,8 @@ dependencies:
   path_provider: ^2.1.4
   # Browser localStorage / Blob download interop on web.
   web: ^1.1.0
+  three_js: ^0.2.7
+  three_js_helpers: ^0.2.3
 
 dev_dependencies:
   flutter_test:

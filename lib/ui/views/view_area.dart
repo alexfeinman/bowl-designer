@@ -1,15 +1,11 @@
-import 'dart:async';
-
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../models/bowl_project.dart';
 import '../../rendering/cross_section_painter.dart';
 import '../../rendering/elevation_painter.dart';
-import '../../rendering/scene_3d.dart';
 import '../../state/project_controller.dart';
 import '../theme.dart';
+import 'bowl_3d_view.dart';
 import 'cut_list_view.dart';
 
 enum BowlView { side, xray, threeD, cutList }
@@ -30,58 +26,6 @@ class ViewArea extends ConsumerStatefulWidget {
 
 class _ViewAreaState extends ConsumerState<ViewArea> {
   BowlView _view = BowlView.side; // Opens on Side elevation.
-  Camera3D _camera = const Camera3D();
-
-  // Latest z-buffered 3D frame plus bookkeeping so we only re-render when the
-  // camera, size, geometry, or selection actually changed.
-  RasterResult? _raster3d;
-  String _rasterKey = '';
-  int _rasterToken = 0;
-
-  // While the user is orbiting/zooming we render at a lower resolution for a
-  // smooth frame rate, then re-render at full quality once motion settles.
-  bool _orbiting = false;
-  Timer? _idleTimer;
-
-  @override
-  void dispose() {
-    _idleTimer?.cancel();
-    _raster3d?.dispose();
-    super.dispose();
-  }
-
-  void _scheduleIdle() {
-    _idleTimer?.cancel();
-    _idleTimer = Timer(const Duration(milliseconds: 200), () {
-      if (mounted) setState(() => _orbiting = false);
-    });
-  }
-
-  /// Kick off an async z-buffer render if inputs changed; setState when ready.
-  void _maybeRenderRaster(BowlProject project, int? highlightRingIndex,
-      Size size, double dpr, bool antialias) {
-    final key = '${project.hashCode}|$highlightRingIndex|'
-        '${size.width.round()}x${size.height.round()}@$dpr|aa=$antialias|'
-        '${_camera.yaw.toStringAsFixed(4)},${_camera.pitch.toStringAsFixed(4)},'
-        '${_camera.zoom.toStringAsFixed(4)}';
-    if (key == _rasterKey) return;
-    _rasterKey = key;
-    final token = ++_rasterToken;
-    rasterizeScene(project, _camera, size,
-            highlightRingIndex: highlightRingIndex,
-            pixelRatio: dpr,
-            antialias: antialias)
-        .then((r) {
-      if (!mounted || token != _rasterToken) {
-        r?.dispose();
-        return;
-      }
-      setState(() {
-        _raster3d?.dispose();
-        _raster3d = r;
-      });
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -182,94 +126,10 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
   }
 
   Widget _threeD() {
-    final project = ref.watch(projectProvider);
-    final selId = ref.watch(selectedRingIdProvider);
     final antialias = ref.watch(antialias3dProvider);
-    final hiIndex = project.rings.indexWhere((r) => r.id == selId);
-    final dpr = MediaQuery.of(context).devicePixelRatio;
-    // Cheaper frames while orbiting: logical resolution, no antialiasing.
-    final effDpr = _orbiting ? 1.0 : dpr;
-    final effAa = _orbiting ? false : antialias;
-    return LayoutBuilder(
-      builder: (context, cons) {
-        final size = Size(cons.maxWidth, cons.maxHeight);
-        _maybeRenderRaster(
-            project, hiIndex < 0 ? null : hiIndex, size, effDpr, effAa);
-        final raster = _raster3d;
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: Listener(
-                onPointerSignal: (e) {
-                  if (e is PointerScrollEvent) {
-                    setState(() {
-                      _camera =
-                          _camera.zoomed(e.scrollDelta.dy < 0 ? 1.1 : 1 / 1.1);
-                      _orbiting = true;
-                    });
-                    _scheduleIdle();
-                  }
-                },
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapUp: (d) {
-                    final idx = raster?.ringIndexAt(d.localPosition, size);
-                    if (idx != null && idx >= 0 && idx < project.rings.length) {
-                      ref
-                          .read(selectionControllerProvider.notifier)
-                          .select(project.rings[idx].id);
-                    }
-                  },
-                  onScaleStart: (_) {},
-                  onScaleUpdate: (d) {
-                    setState(() {
-                      _camera = _camera.rotated(
-                        d.focalPointDelta.dx * 0.01,
-                        -d.focalPointDelta.dy * 0.01,
-                      );
-                      if (d.scale != 1.0) {
-                        _camera = _camera.zoomed(d.scale > 1 ? 1.03 : 1 / 1.03);
-                      }
-                      _orbiting = true;
-                    });
-                    _scheduleIdle();
-                  },
-                  child: raster == null
-                      ? const SizedBox.expand()
-                      : RawImage(
-                          image: raster.image,
-                          fit: BoxFit.fill,
-                          filterQuality: FilterQuality.medium,
-                        ),
-                ),
-              ),
-            ),
-            const _ViewLabel(
-                text: '3D · DRAG TO ORBIT · SCROLL OR ± TO ZOOM · CLICK TO SELECT',
-                light: true),
-            Positioned(
-              right: 12,
-              bottom: 12,
-              child: Row(
-                children: [
-                  _RoundBtn(icon: Icons.remove, onTap: () => _zoom(1 / 1.2)),
-                  const SizedBox(width: 6),
-                  _RoundBtn(icon: Icons.add, onTap: () => _zoom(1.2)),
-                  const SizedBox(width: 10),
-                  _GhostButton(
-                    label: 'Reset view',
-                    onTap: () => setState(() => _camera = const Camera3D()),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        );
-      },
-    );
+    // Recreate the GPU view when AA changes (it's a renderer-construction flag).
+    return Bowl3DView(key: ValueKey(antialias), antialias: antialias);
   }
-
-  void _zoom(double factor) => setState(() => _camera = _camera.zoomed(factor));
 }
 
 class _TabBar extends ConsumerWidget {
@@ -357,9 +217,8 @@ class _Tab extends StatelessWidget {
 }
 
 class _ViewLabel extends StatelessWidget {
-  const _ViewLabel({required this.text, this.light = false});
+  const _ViewLabel({required this.text});
   final String text;
-  final bool light;
 
   @override
   Widget build(BuildContext context) {
@@ -372,7 +231,7 @@ class _ViewLabel extends StatelessWidget {
         style: AppFonts.mono(TextStyle(
           fontSize: 10.5,
           letterSpacing: 0.6,
-          color: light ? Colors.white.withValues(alpha: 0.55) : c.faint,
+          color: c.faint,
         )),
       ),
     );
@@ -417,42 +276,3 @@ class _GridToggle extends StatelessWidget {
   }
 }
 
-class _RoundBtn extends StatelessWidget {
-  const _RoundBtn({required this.icon, required this.onTap});
-  final IconData icon;
-  final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withValues(alpha: 0.1),
-      shape: const CircleBorder(),
-      child: InkWell(
-        onTap: onTap,
-        customBorder: const CircleBorder(),
-        child: Padding(
-          padding: const EdgeInsets.all(7),
-          child: Icon(icon, size: 18, color: Colors.white.withValues(alpha: 0.85)),
-        ),
-      ),
-    );
-  }
-}
-
-class _GhostButton extends StatelessWidget {
-  const _GhostButton({required this.label, required this.onTap});
-  final String label;
-  final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) {
-    return TextButton(
-      onPressed: onTap,
-      style: TextButton.styleFrom(
-        foregroundColor: Colors.white.withValues(alpha: 0.8),
-        backgroundColor: Colors.white.withValues(alpha: 0.08),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      ),
-      child: Text(label,
-          style: AppFonts.ui(const TextStyle(fontSize: 11.5, color: Colors.white))),
-    );
-  }
-}

@@ -1,30 +1,10 @@
-import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:vector_math/vector_math_64.dart' as vm;
 
 import '../models/bowl_project.dart';
-
-/// Orbit camera state for the 3D view.
-class Camera3D {
-  const Camera3D({this.yaw = 0.6, this.pitch = 0.5, this.zoom = 1.0});
-
-  final double yaw;
-  final double pitch;
-  final double zoom;
-
-  Camera3D rotated(double dYaw, double dPitch) => Camera3D(
-        yaw: yaw + dYaw,
-        pitch: (pitch + dPitch).clamp(-1.4, 1.4),
-        zoom: zoom,
-      );
-
-  Camera3D zoomed(double factor) =>
-      Camera3D(yaw: yaw, pitch: pitch, zoom: (zoom * factor).clamp(0.4, 6.0));
-}
 
 /// A flat, colored polygon in world space (mm), tagged with its ring index.
 class _Face {
@@ -104,16 +84,42 @@ void _addFace(List<_Face> faces, List<vm.Vector3> pts, Color color, int ri) {
   faces.add(_Face(pts, color, shade, ri));
 }
 
-// Cache the built mesh by project identity so orbiting (camera-only changes)
-// doesn't rebuild geometry every frame.
-BowlProject? _facesProject;
-List<_Face>? _facesCache;
-List<_Face> _cachedFaces(BowlProject project) {
-  if (!identical(project, _facesProject)) {
-    _facesCache = _buildFaces(project);
-    _facesProject = project;
+/// Triangulated geometry for one ring: interleaved xyz positions and rgb (0..1)
+/// vertex colours, 3 vertices per triangle. Feeds a GPU mesh (three_js).
+class RingTriangles {
+  RingTriangles(this.ringIndex, this.positions, this.colors);
+  final int ringIndex;
+  final Float32List positions;
+  final Float32List colors;
+}
+
+/// Build per-ring triangle buffers from the same geometry the 2D/OBJ paths use.
+/// Colours are the raw segment material colours; GPU lighting does the shading.
+List<RingTriangles> buildRingTriangles(BowlProject project) {
+  final pos = <int, List<double>>{};
+  final col = <int, List<double>>{};
+  for (final f in _buildFaces(project)) {
+    final p = pos.putIfAbsent(f.ringIndex, () => <double>[]);
+    final c = col.putIfAbsent(f.ringIndex, () => <double>[]);
+    final cr = f.color.r, cg = f.color.g, cb = f.color.b;
+    void emit(vm.Vector3 v) {
+      p..add(v.x)..add(v.y)..add(v.z);
+      c..add(cr)..add(cg)..add(cb);
+    }
+
+    // Triangulate the (convex) face as a fan.
+    for (var k = 1; k < f.points.length - 1; k++) {
+      emit(f.points[0]);
+      emit(f.points[k]);
+      emit(f.points[k + 1]);
+    }
   }
-  return _facesCache!;
+  final ids = pos.keys.toList()..sort();
+  return [
+    for (final ri in ids)
+      RingTriangles(
+          ri, Float32List.fromList(pos[ri]!), Float32List.fromList(col[ri]!))
+  ];
 }
 
 Color _lighten(Color c, double t) => Color.lerp(c, const Color(0xFFFFFFFF), t)!;
@@ -139,274 +145,4 @@ String meshObj(BowlProject project) {
     idx += f.points.length;
   }
   return sb.toString();
-}
-
-// ---------------------------------------------------------------------------
-// Z-buffer software rasterizer.
-//
-// Sorting whole faces (painter's algorithm) or ordering them with a BSP tree
-// both mis-resolve this mesh: many faces share planes through the axis, so no
-// single draw order is correct. A per-pixel depth buffer has no ordering
-// assumption — each pixel keeps the nearest fragment — so occlusion is always
-// right regardless of how the faces overlap.
-// ---------------------------------------------------------------------------
-
-/// A rendered frame: the image plus a per-pixel ring-index map for hit-testing.
-class RasterResult {
-  RasterResult._(this.image, this.width, this.height, this._ringId);
-  final ui.Image image;
-  final int width;
-  final int height;
-  final Int32List _ringId; // 0 = empty, else ringIndex + 1
-
-  /// Ring index under [local] (in a widget of [widgetSize]), or null.
-  int? ringIndexAt(Offset local, Size widgetSize) {
-    if (widgetSize.width <= 0 || widgetSize.height <= 0) return null;
-    final x = (local.dx / widgetSize.width * width).floor().clamp(0, width - 1);
-    final y = (local.dy / widgetSize.height * height).floor().clamp(0, height - 1);
-    final r = _ringId[y * width + x];
-    return r == 0 ? null : r - 1;
-  }
-
-  void dispose() => image.dispose();
-}
-
-/// Render [project] from [camera] into an image sized to [size], with the
-/// segments of [highlightRingIndex] outlined in the accent colour.
-Future<RasterResult?> rasterizeScene(
-  BowlProject project,
-  Camera3D camera,
-  Size size, {
-  int? highlightRingIndex,
-  double pixelRatio = 1.0,
-  bool antialias = false,
-}) {
-  if (project.rings.isEmpty || size.width < 2 || size.height < 2) {
-    return Future.value(null);
-  }
-  // Render at the pane's true device-pixel size so displayed 1:1 (crisp edges).
-  // A generous cap only guards pathologically large / high-DPI windows.
-  // With antialiasing we supersample by ss and box-downsample, so bound the
-  // *super* resolution — the displayed image ends up ss× smaller than that.
-  final ss = antialias ? 2 : 1;
-  const maxDim = 2600.0;
-  final cap = maxDim / ss;
-  final tw = size.width * pixelRatio;
-  final th = size.height * pixelRatio;
-  final resScale = math.min(1.0, cap / math.max(tw, th));
-  final w = math.max(2, (tw * resScale).round()); // displayed dims
-  final h = math.max(2, (th * resScale).round());
-  final sw = w * ss, sh = h * ss; // super-sampled render dims
-
-  final radius = project.maxOuterDiameterMm / 2;
-  final extent = math.max(radius, project.totalHeightMm / 2) * 2.2;
-  // Camera at a fixed distance (outside the object); zoom magnifies the image.
-  final camDist = extent;
-  final model = vm.Matrix4.identity()
-    ..rotateX(camera.pitch)
-    ..rotateY(camera.yaw);
-  final view = vm.makeViewMatrix(
-      vm.Vector3(0, 0, camDist), vm.Vector3.zero(), vm.Vector3(0, 1, 0));
-  final proj =
-      vm.makePerspectiveMatrix(45 * math.pi / 180, sw / sh, 1, extent * 6);
-  final mvp = proj * (view * model);
-  final ccx = sw / 2, ccy = sh / 2, zoom = camera.zoom;
-
-  // Flatten the MVP (column-major) so the per-vertex transform allocates no
-  // Vector4s in the hot loop.
-  final ms = mvp.storage;
-  final m0 = ms[0], m4 = ms[4], m8 = ms[8], m12 = ms[12];
-  final m1 = ms[1], m5 = ms[5], m9 = ms[9], m13 = ms[13];
-  final m3 = ms[3], m7 = ms[7], m11 = ms[11], m15 = ms[15];
-
-  final n = sw * sh;
-  final rgba = Uint8List(n * 4);
-  final depth = Float32List(n)..fillRange(0, n, 1e30);
-  final faceId = Int32List(n);
-  final ringId = Int32List(n);
-
-  final px = List<double>.filled(8, 0);
-  final py = List<double>.filled(8, 0);
-  final pz = List<double>.filled(8, 0);
-
-  var fid = 0;
-  for (final f in _cachedFaces(project)) {
-    fid++;
-    final m = f.points.length;
-    var ok = true;
-    for (var i = 0; i < m; i++) {
-      final wp = f.points[i];
-      final x = wp.x, y = wp.y, zc = wp.z;
-      final cw = m3 * x + m7 * y + m11 * zc + m15;
-      if (cw <= 1e-6) {
-        ok = false; // behind the camera
-        break;
-      }
-      final cxp = m0 * x + m4 * y + m8 * zc + m12;
-      final cyp = m1 * x + m5 * y + m9 * zc + m13;
-      final sx = (cxp / cw + 1) / 2 * sw;
-      final sy = (1 - (cyp / cw + 1) / 2) * sh;
-      px[i] = ccx + (sx - ccx) * zoom;
-      py[i] = ccy + (sy - ccy) * zoom;
-      pz[i] = cw; // nearer = smaller
-    }
-    if (!ok) continue;
-
-    final c = f.color;
-    final r = (c.r * f.shade * 255).round().clamp(0, 255);
-    final g = (c.g * f.shade * 255).round().clamp(0, 255);
-    final b = (c.b * f.shade * 255).round().clamp(0, 255);
-    final ring1 = f.ringIndex + 1;
-    for (var k = 1; k < m - 1; k++) {
-      _rasterTri(sw, sh, px[0], py[0], pz[0], px[k], py[k], pz[k], px[k + 1],
-          py[k + 1], pz[k + 1], r, g, b, fid, ring1, rgba, depth, faceId, ringId);
-    }
-  }
-
-  _edgePass(sw, sh, rgba, faceId, ringId,
-      highlightRingIndex == null ? -1 : highlightRingIndex + 1);
-
-  // Downsample the super-res colour to the display buffer (box filter); sample
-  // the ring-id map at the block centre for hit-testing.
-  final Uint8List outRgba;
-  final Int32List outRing;
-  if (ss == 1) {
-    outRgba = rgba;
-    outRing = ringId;
-  } else {
-    outRgba = Uint8List(w * h * 4);
-    outRing = Int32List(w * h);
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        var rr = 0, gg = 0, bb = 0, aa = 0;
-        for (var dy = 0; dy < ss; dy++) {
-          for (var dx = 0; dx < ss; dx++) {
-            final si = ((y * ss + dy) * sw + (x * ss + dx)) * 4;
-            rr += rgba[si];
-            gg += rgba[si + 1];
-            bb += rgba[si + 2];
-            aa += rgba[si + 3];
-          }
-        }
-        final cnt = ss * ss;
-        final o = (y * w + x) * 4;
-        outRgba[o] = rr ~/ cnt;
-        outRgba[o + 1] = gg ~/ cnt;
-        outRgba[o + 2] = bb ~/ cnt;
-        outRgba[o + 3] = aa ~/ cnt;
-        outRing[y * w + x] = ringId[(y * ss) * sw + (x * ss)];
-      }
-    }
-  }
-
-  final completer = Completer<RasterResult?>();
-  ui.decodeImageFromPixels(outRgba, w, h, ui.PixelFormat.rgba8888,
-      (img) => completer.complete(RasterResult._(img, w, h, outRing)));
-  return completer.future;
-}
-
-void _rasterTri(
-  int w,
-  int h,
-  double ax,
-  double ay,
-  double az,
-  double bx,
-  double by,
-  double bz,
-  double cx,
-  double cy,
-  double cz,
-  int r,
-  int g,
-  int b,
-  int fid,
-  int ring1,
-  Uint8List rgba,
-  Float32List depth,
-  Int32List faceId,
-  Int32List ringId,
-) {
-  var minX = math.min(ax, math.min(bx, cx)).floor();
-  var maxX = math.max(ax, math.max(bx, cx)).ceil();
-  var minY = math.min(ay, math.min(by, cy)).floor();
-  var maxY = math.max(ay, math.max(by, cy)).ceil();
-  if (minX < 0) minX = 0;
-  if (minY < 0) minY = 0;
-  if (maxX > w - 1) maxX = w - 1;
-  if (maxY > h - 1) maxY = h - 1;
-  if (minX > maxX || minY > maxY) return;
-
-  final d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
-  if (d.abs() < 1e-9) return;
-  final invd = 1 / d;
-
-  for (var y = minY; y <= maxY; y++) {
-    final fy = y + 0.5;
-    for (var x = minX; x <= maxX; x++) {
-      final fx = x + 0.5;
-      final l1 = ((by - cy) * (fx - cx) + (cx - bx) * (fy - cy)) * invd;
-      if (l1 < 0) continue;
-      final l2 = ((cy - ay) * (fx - cx) + (ax - cx) * (fy - cy)) * invd;
-      if (l2 < 0) continue;
-      final l3 = 1 - l1 - l2;
-      if (l3 < 0) continue;
-      final zz = l1 * az + l2 * bz + l3 * cz;
-      final idx = y * w + x;
-      if (zz < depth[idx]) {
-        depth[idx] = zz;
-        final o = idx * 4;
-        rgba[o] = r;
-        rgba[o + 1] = g;
-        rgba[o + 2] = b;
-        rgba[o + 3] = 255;
-        faceId[idx] = fid;
-        ringId[idx] = ring1;
-      }
-    }
-  }
-}
-
-/// Draw 1px boundaries between faces: a darker seam between segments and the
-/// accent colour along the highlighted ring — recovering the crisp outlined
-/// look on top of the z-buffered fills.
-void _edgePass(int w, int h, Uint8List rgba, Int32List faceId, Int32List ringId,
-    int hiRing) {
-  for (var y = 0; y < h; y++) {
-    for (var x = 0; x < w; x++) {
-      final idx = y * w + x;
-      final fidHere = faceId[idx];
-      if (fidHere == 0) continue; // background
-      var edge = false;
-      var accent = false;
-      if (x + 1 < w && faceId[idx + 1] != fidHere) {
-        edge = true;
-        if (ringId[idx] == hiRing || ringId[idx + 1] == hiRing) accent = true;
-      }
-      if (!edge && x > 0 && faceId[idx - 1] != fidHere) {
-        edge = true;
-        if (ringId[idx] == hiRing || ringId[idx - 1] == hiRing) accent = true;
-      }
-      if (!edge && y + 1 < h && faceId[idx + w] != fidHere) {
-        edge = true;
-        if (ringId[idx] == hiRing || ringId[idx + w] == hiRing) accent = true;
-      }
-      if (!edge && y > 0 && faceId[idx - w] != fidHere) {
-        edge = true;
-        if (ringId[idx] == hiRing || ringId[idx - w] == hiRing) accent = true;
-      }
-      if (!edge) continue;
-      final o = idx * 4;
-      if (accent) {
-        rgba[o] = 0xD9;
-        rgba[o + 1] = 0xA4;
-        rgba[o + 2] = 0x41;
-      } else {
-        rgba[o] = (rgba[o] * 0.5).round();
-        rgba[o + 1] = (rgba[o + 1] * 0.5).round();
-        rgba[o + 2] = (rgba[o + 2] * 0.5).round();
-      }
-      rgba[o + 3] = 255;
-    }
-  }
 }
