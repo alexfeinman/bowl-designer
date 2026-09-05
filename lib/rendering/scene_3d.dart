@@ -266,7 +266,11 @@ List<_Projected> _projectScene(
     BowlProject project, Camera3D camera, Size size, bool xray) {
   final radius = project.maxOuterDiameterMm / 2;
   final extent = math.max(radius, project.totalHeightMm / 2) * 2.2;
-  final camDist = extent / camera.zoom;
+  // Keep the camera at a FIXED distance (always outside the object) and apply
+  // zoom as a magnification of the projected image. Dollying the camera in
+  // (camDist / zoom) would push it inside the rings, so faces crossed behind
+  // the near plane and projected to garbage — the "worse when zoomed" artefact.
+  final camDist = extent;
 
   final model = vm.Matrix4.identity()
     ..rotateX(camera.pitch)
@@ -277,6 +281,9 @@ List<_Projected> _projectScene(
   final proj = vm.makePerspectiveMatrix(45 * math.pi / 180, aspect, 1, extent * 6);
   final viewModel = view * model;
   final mvp = proj * viewModel;
+
+  final cx = size.width / 2, cy = size.height / 2;
+  final z = camera.zoom;
 
   // Faces already come back in exact back-to-front order from the BSP tree, so
   // no depth sorting (and no per-face heuristic) is needed — just project them.
@@ -289,14 +296,14 @@ List<_Projected> _projectScene(
       final v = viewModel.transformed3(wp);
       depthSum += v.z;
       final clip = mvp.transform(vm.Vector4(wp.x, wp.y, wp.z, 1));
-      if (clip.w.abs() < 1e-6) {
-        ok = false;
+      if (clip.w <= 1e-6) {
+        ok = false; // behind (or on) the camera — skip
         break;
       }
-      screen.add(Offset(
-        (clip.x / clip.w + 1) / 2 * size.width,
-        (1 - (clip.y / clip.w + 1) / 2) * size.height,
-      ));
+      final sx = (clip.x / clip.w + 1) / 2 * size.width;
+      final sy = (1 - (clip.y / clip.w + 1) / 2) * size.height;
+      // Magnify about the view centre.
+      screen.add(Offset(cx + (sx - cx) * z, cy + (sy - cy) * z));
     }
     if (!ok) continue;
     final base = f.color;
