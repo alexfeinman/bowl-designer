@@ -102,6 +102,13 @@ void main() {
       expect(open.physicalSegments, 12); // gaps don't remove segments
       expect(open.miterAngleDeg, closeTo(closed.miterAngleDeg, 1e-9));
       expect(closed.miterAngleDeg, closeTo(15.0, 1e-9)); // classic 180/n
+
+      // A flat gap trims both ends of each segment, so the edges get shorter:
+      // gapMm / cos(pi/n) off the outer and inner edge alike.
+      final trim = 6 / math.cos(math.pi / 12);
+      expect(open.outerEdgeMm, closeTo(closed.outerEdgeMm - trim, 1e-9));
+      expect(open.innerEdgeMm, closeTo(closed.innerEdgeMm - trim, 1e-9));
+      expect(open.outerEdgeMm, lessThan(closed.outerEdgeMm));
     });
   });
 

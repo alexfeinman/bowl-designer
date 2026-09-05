@@ -66,10 +66,22 @@ class RingGeometry {
   static double miterForRing(Ring ring) =>
       ring.isSolid ? 0.0 : 180.0 / ring.segmentCount;
 
-  /// Flat edge length of a segment at radius [radiusMm] given a half-span.
+  /// Flat edge length of a segment at radius [radiusMm] given a half-span,
+  /// with no gap: 2·r·tan(halfSpan) — the circumscribed polygon side.
   static double edgeLength(double radiusMm, double halfSpan) {
     if (halfSpan <= 0 || radiusMm <= 0) return 0.0;
     return 2 * radiusMm * math.tan(halfSpan);
+  }
+
+  /// Flat edge length at radius [radiusMm] once a flat gap of [gapMm] is left
+  /// between adjacent segments. The gap is a parallel slot, so each glue face
+  /// moves in by gapMm/2 and trims gapMm/(2·cos(halfSpan)) off each end of the
+  /// edge — i.e. gapMm/cos(halfSpan) total. Never returns below zero.
+  static double edgeLengthWithGap(double radiusMm, double halfSpan, double gapMm) {
+    final full = edgeLength(radiusMm, halfSpan);
+    if (full <= 0) return 0.0;
+    if (gapMm <= 0) return full;
+    return math.max(0.0, full - gapMm / math.cos(halfSpan));
   }
 
   /// Full shop specification for a single [ring].
@@ -80,8 +92,10 @@ class RingGeometry {
     final physical = ring.physicalSegmentCount;
     final halfSpan = halfSpanRad(ring);
 
-    final outerEdge = solid ? ring.outerDiameter : edgeLength(ro, halfSpan);
-    final innerEdge = solid ? 0.0 : edgeLength(ri, halfSpan);
+    final outerEdge =
+        solid ? ring.outerDiameter : edgeLengthWithGap(ro, halfSpan, ring.gapMm);
+    final innerEdge =
+        solid ? 0.0 : edgeLengthWithGap(ri, halfSpan, ring.gapMm);
     final wall = ring.width;
 
     final boardLength = physical * (outerEdge + kerfAllowanceMm);
