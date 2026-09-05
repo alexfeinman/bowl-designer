@@ -76,7 +76,7 @@ class ElevationPainter extends CustomPainter {
       } else {
         final jointPaint = Paint()
           ..strokeWidth = 0.7
-          ..color = colors.ink.withValues(alpha: 0.35);
+          ..color = colors.ink.withValues(alpha: 0.45);
         for (var i = 0; i < n; i++) {
           final ta = i * slot + rot;
           final tb = (i + 1) * slot + rot;
@@ -98,6 +98,17 @@ class ElevationPainter extends CustomPainter {
           canvas.drawLine(Offset(left, top), Offset(left, y), jointPaint);
           canvas.drawLine(Offset(right, top), Offset(right, y), jointPaint);
         }
+      }
+
+      // Course separators so adjacent rings never bleed into one another:
+      // a firm line along this ring's top edge (its boundary with the ring
+      // above), plus the base's bottom edge for the very first ring.
+      final courseSep = Paint()
+        ..strokeWidth = 1.1
+        ..color = colors.ink.withValues(alpha: 0.55);
+      canvas.drawLine(Offset(cx - ro, top), Offset(cx + ro, top), courseSep);
+      if (ringIndex == 0) {
+        canvas.drawLine(Offset(cx - ro, y), Offset(cx + ro, y), courseSep);
       }
 
       if (ring.id == highlightRingId) {

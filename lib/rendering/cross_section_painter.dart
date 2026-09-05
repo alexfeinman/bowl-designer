@@ -172,70 +172,33 @@ class CrossSectionPainter extends CustomPainter {
   }
 
   /// Draw the x-ray: the finished bowl WALL (both turned surfaces) as a smooth
-  /// profile that fits inside the segment blocks — the largest smooth bowl the
-  /// glued stack can yield. The outer surface is the moving-minimum of the block
-  /// outer radii (so it never pokes past a course); the inner surface is the
-  /// moving-maximum of the bores; both are then smoothed.
+  /// profile through the ring cross-sections. The outer surface passes through
+  /// each ring's outer radius and the inner through each bore, interpolated with
+  /// a monotone cubic so the wall reads as one fair curve rather than the block
+  /// staircase; the bore closes to the base so the vessel has a solid bottom.
   /// [bands] entries are [top, bottom, outerR, innerR] in screen px, base first.
   void _paintProfileWireframe(Canvas canvas, double cx, List<List<double>> bands) {
     if (bands.isEmpty) return;
     final topRim = bands.last[0];
     final baseBottom = bands.first[1];
 
-    double blockR(double y, int idx) {
-      for (final b in bands) {
-        if (y >= b[0] - 0.5 && y <= b[1] + 0.5) return b[idx];
-      }
-      return y < topRim ? bands.last[idx] : bands.first[idx];
+    // Control points at each ring's vertical centre, ordered top -> bottom.
+    final cy = <double>[];
+    final co = <double>[]; // outer radius
+    final ci = <double>[]; // bore radius
+    for (final b in bands.reversed) {
+      cy.add((b[0] + b[1]) / 2);
+      co.add(b[2]);
+      ci.add(b[3]);
     }
 
-    const n = 200;
+    const n = 240;
     final ys = [for (var i = 0; i <= n; i++) topRim + (baseBottom - topRim) * i / n];
-    final ceil = [for (final y in ys) blockR(y, 2)];
-    final floor = [for (final y in ys) blockR(y, 3)];
-    final win = (n * 0.05).round().clamp(3, 24); // window ~ a course thickness
-
-    List<double> moving(List<double> src, bool takeMin) {
-      return [
-        for (var i = 0; i < src.length; i++)
-          () {
-            var acc = src[i];
-            for (var j = i - win; j <= i + win; j++) {
-              if (j < 0 || j >= src.length) continue;
-              acc = takeMin ? math.min(acc, src[j]) : math.max(acc, src[j]);
-            }
-            return acc;
-          }()
-      ];
-    }
-
-    List<double> smooth(List<double> src) {
-      final sw = (win / 2).round().clamp(1, 12);
-      return [
-        for (var i = 0; i < src.length; i++)
-          () {
-            var sum = 0.0;
-            var cnt = 0;
-            for (var j = i - sw; j <= i + sw; j++) {
-              if (j < 0 || j >= src.length) continue;
-              sum += src[j];
-              cnt++;
-            }
-            return sum / cnt;
-          }()
-      ];
-    }
-
-    final outer = smooth(moving(ceil, true));
-    final inner = smooth(moving(floor, false));
-    for (var i = 0; i < outer.length; i++) {
-      outer[i] = math.min(outer[i], ceil[i]); // stay inside the blocks
-      // The finished bore must clear the widest block bore here yet stay inside
-      // the outer silhouette. Where a narrow ring below leaves no material, the
-      // bore meets the wall (zero thickness). Written with min/max — never
-      // num.clamp, whose lower>upper case throws (base disk vs. wider bores).
-      final bore = math.max(0.0, floor[i]);
-      inner[i] = math.min(math.max(inner[i], bore), outer[i]);
+    final outer = _monotone(cy, co, ys);
+    final inner = _monotone(cy, ci, ys);
+    for (var i = 0; i < ys.length; i++) {
+      // Keep the bore inside the wall so the fill never inverts.
+      inner[i] = math.min(math.max(0.0, inner[i]), outer[i]);
     }
 
     final outerPts = [for (var i = 0; i < ys.length; i++) Offset(outer[i], ys[i])];
@@ -279,6 +242,62 @@ class CrossSectionPainter extends CustomPainter {
         Offset(cx + outer.first, topRim), outerStroke);
     canvas.drawLine(Offset(cx - inner.first, topRim),
         Offset(cx - outer.first, topRim), outerStroke);
+  }
+
+  /// Monotone cubic Hermite (Fritsch–Carlson) interpolation of the values [vs]
+  /// sampled at ascending knots [xs], evaluated at each query in [qs]. Produces
+  /// a smooth curve with no overshoot beyond the data, and holds the endpoint
+  /// value outside the knot range (flat rim opening / base).
+  List<double> _monotone(List<double> xs, List<double> vs, List<double> qs) {
+    final k = xs.length;
+    if (k == 0) return [for (final _ in qs) 0.0];
+    if (k == 1) return [for (final _ in qs) vs[0]];
+
+    final d = List<double>.filled(k - 1, 0); // secant slopes
+    for (var i = 0; i < k - 1; i++) {
+      final dx = xs[i + 1] - xs[i];
+      d[i] = dx == 0 ? 0 : (vs[i + 1] - vs[i]) / dx;
+    }
+    final m = List<double>.filled(k, 0); // tangents
+    m[0] = d[0];
+    m[k - 1] = d[k - 2];
+    for (var i = 1; i < k - 1; i++) {
+      m[i] = d[i - 1] * d[i] <= 0 ? 0.0 : (d[i - 1] + d[i]) / 2;
+    }
+    for (var i = 0; i < k - 1; i++) {
+      if (d[i] == 0) {
+        m[i] = 0;
+        m[i + 1] = 0;
+        continue;
+      }
+      final a = m[i] / d[i];
+      final b = m[i + 1] / d[i];
+      final s = a * a + b * b;
+      if (s > 9) {
+        final t = 3 / math.sqrt(s);
+        m[i] = t * a * d[i];
+        m[i + 1] = t * b * d[i];
+      }
+    }
+
+    return [
+      for (final q in qs)
+        () {
+          if (q <= xs[0]) return vs[0];
+          if (q >= xs[k - 1]) return vs[k - 1];
+          var i = 0;
+          while (i < k - 1 && q > xs[i + 1]) {
+            i++;
+          }
+          final h = xs[i + 1] - xs[i];
+          final t = (q - xs[i]) / h;
+          final t2 = t * t, t3 = t2 * t;
+          return (2 * t3 - 3 * t2 + 1) * vs[i] +
+              (t3 - 2 * t2 + t) * h * m[i] +
+              (-2 * t3 + 3 * t2) * vs[i + 1] +
+              (t3 - t2) * h * m[i + 1];
+        }()
+    ];
   }
 
   void _dashedLine(Canvas c, Offset a, Offset b, Paint p) {
