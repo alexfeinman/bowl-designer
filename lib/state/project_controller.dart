@@ -153,6 +153,11 @@ class ProjectController extends Notifier<ProjectHistory> {
     _persist();
   }
 
+  void setAntialias3d(bool on) {
+    state = state.replaceCurrent(project.copyWith(antialias3d: on));
+    _persist();
+  }
+
   void setKerfAllowance(double mm) {
     state = state.replaceCurrent(project.copyWith(kerfAllowanceMm: mm));
     _persist();
@@ -187,6 +192,10 @@ final projectProvider =
 /// Active display unit (lives on the project).
 final displayUnitProvider =
     Provider<LengthUnit>((ref) => ref.watch(projectProvider).displayUnit);
+
+/// Whether the 3D view is antialiased (lives on the project, so it persists).
+final antialias3dProvider =
+    Provider<bool>((ref) => ref.watch(projectProvider).antialias3d);
 
 /// Holds the currently selected ring id. Deliberately does NOT watch the
 /// project, so editing a ring never snaps the selection back to another ring.

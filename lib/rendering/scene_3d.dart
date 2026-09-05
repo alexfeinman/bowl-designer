@@ -104,6 +104,18 @@ void _addFace(List<_Face> faces, List<vm.Vector3> pts, Color color, int ri) {
   faces.add(_Face(pts, color, shade, ri));
 }
 
+// Cache the built mesh by project identity so orbiting (camera-only changes)
+// doesn't rebuild geometry every frame.
+BowlProject? _facesProject;
+List<_Face>? _facesCache;
+List<_Face> _cachedFaces(BowlProject project) {
+  if (!identical(project, _facesProject)) {
+    _facesCache = _buildFaces(project);
+    _facesProject = project;
+  }
+  return _facesCache!;
+}
+
 Color _lighten(Color c, double t) => Color.lerp(c, const Color(0xFFFFFFFF), t)!;
 Color _darken(Color c, double t) => Color.lerp(c, const Color(0xFF000000), t)!;
 
@@ -200,6 +212,13 @@ Future<RasterResult?> rasterizeScene(
   final mvp = proj * (view * model);
   final ccx = sw / 2, ccy = sh / 2, zoom = camera.zoom;
 
+  // Flatten the MVP (column-major) so the per-vertex transform allocates no
+  // Vector4s in the hot loop.
+  final ms = mvp.storage;
+  final m0 = ms[0], m4 = ms[4], m8 = ms[8], m12 = ms[12];
+  final m1 = ms[1], m5 = ms[5], m9 = ms[9], m13 = ms[13];
+  final m3 = ms[3], m7 = ms[7], m11 = ms[11], m15 = ms[15];
+
   final n = sw * sh;
   final rgba = Uint8List(n * 4);
   final depth = Float32List(n)..fillRange(0, n, 1e30);
@@ -211,22 +230,25 @@ Future<RasterResult?> rasterizeScene(
   final pz = List<double>.filled(8, 0);
 
   var fid = 0;
-  for (final f in _buildFaces(project)) {
+  for (final f in _cachedFaces(project)) {
     fid++;
     final m = f.points.length;
     var ok = true;
     for (var i = 0; i < m; i++) {
       final wp = f.points[i];
-      final clip = mvp.transform(vm.Vector4(wp.x, wp.y, wp.z, 1));
-      if (clip.w <= 1e-6) {
+      final x = wp.x, y = wp.y, zc = wp.z;
+      final cw = m3 * x + m7 * y + m11 * zc + m15;
+      if (cw <= 1e-6) {
         ok = false; // behind the camera
         break;
       }
-      final sx = (clip.x / clip.w + 1) / 2 * sw;
-      final sy = (1 - (clip.y / clip.w + 1) / 2) * sh;
+      final cxp = m0 * x + m4 * y + m8 * zc + m12;
+      final cyp = m1 * x + m5 * y + m9 * zc + m13;
+      final sx = (cxp / cw + 1) / 2 * sw;
+      final sy = (1 - (cyp / cw + 1) / 2) * sh;
       px[i] = ccx + (sx - ccx) * zoom;
       py[i] = ccy + (sy - ccy) * zoom;
-      pz[i] = clip.w; // nearer = smaller
+      pz[i] = cw; // nearer = smaller
     }
     if (!ok) continue;
 

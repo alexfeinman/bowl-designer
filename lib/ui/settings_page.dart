@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/units.dart';
 import '../state/project_controller.dart';
 import 'theme.dart';
-import 'views/view_area.dart';
 
 /// A dedicated full-screen settings page. Grouped, extensible sections.
 class SettingsPage extends ConsumerWidget {
@@ -38,8 +37,7 @@ class SettingsPage extends ConsumerWidget {
               _card(c, [
                 SwitchListTile(
                   value: aa,
-                  onChanged: (v) =>
-                      ref.read(antialias3dProvider.notifier).state = v,
+                  onChanged: ctrl.setAntialias3d,
                   activeColor: c.accent,
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 4),

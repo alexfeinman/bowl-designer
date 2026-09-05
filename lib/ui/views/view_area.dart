@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,10 +22,6 @@ final viewMaximizedProvider = StateProvider<bool>((ref) => false);
 /// Off by default.
 final gridVisibleProvider = StateProvider<bool>((ref) => false);
 
-/// Whether the 3D view is supersampled (antialiased). Off by default — it is
-/// ~4× the render work. Exposed in the Settings screen.
-final antialias3dProvider = StateProvider<bool>((ref) => false);
-
 class ViewArea extends ConsumerStatefulWidget {
   const ViewArea({super.key});
   @override
@@ -40,10 +38,23 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
   String _rasterKey = '';
   int _rasterToken = 0;
 
+  // While the user is orbiting/zooming we render at a lower resolution for a
+  // smooth frame rate, then re-render at full quality once motion settles.
+  bool _orbiting = false;
+  Timer? _idleTimer;
+
   @override
   void dispose() {
+    _idleTimer?.cancel();
     _raster3d?.dispose();
     super.dispose();
+  }
+
+  void _scheduleIdle() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer(const Duration(milliseconds: 200), () {
+      if (mounted) setState(() => _orbiting = false);
+    });
   }
 
   /// Kick off an async z-buffer render if inputs changed; setState when ready.
@@ -176,11 +187,14 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
     final antialias = ref.watch(antialias3dProvider);
     final hiIndex = project.rings.indexWhere((r) => r.id == selId);
     final dpr = MediaQuery.of(context).devicePixelRatio;
+    // Cheaper frames while orbiting: logical resolution, no antialiasing.
+    final effDpr = _orbiting ? 1.0 : dpr;
+    final effAa = _orbiting ? false : antialias;
     return LayoutBuilder(
       builder: (context, cons) {
         final size = Size(cons.maxWidth, cons.maxHeight);
         _maybeRenderRaster(
-            project, hiIndex < 0 ? null : hiIndex, size, dpr, antialias);
+            project, hiIndex < 0 ? null : hiIndex, size, effDpr, effAa);
         final raster = _raster3d;
         return Stack(
           children: [
@@ -188,8 +202,12 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
               child: Listener(
                 onPointerSignal: (e) {
                   if (e is PointerScrollEvent) {
-                    setState(() => _camera =
-                        _camera.zoomed(e.scrollDelta.dy < 0 ? 1.1 : 1 / 1.1));
+                    setState(() {
+                      _camera =
+                          _camera.zoomed(e.scrollDelta.dy < 0 ? 1.1 : 1 / 1.1);
+                      _orbiting = true;
+                    });
+                    _scheduleIdle();
                   }
                 },
                 child: GestureDetector(
@@ -212,7 +230,9 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
                       if (d.scale != 1.0) {
                         _camera = _camera.zoomed(d.scale > 1 ? 1.03 : 1 / 1.03);
                       }
+                      _orbiting = true;
                     });
+                    _scheduleIdle();
                   },
                   child: raster == null
                       ? const SizedBox.expand()
