@@ -127,8 +127,15 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
 
   Widget _threeD() {
     final antialias = ref.watch(antialias3dProvider);
-    // Recreate the GPU view when AA changes (it's a renderer-construction flag).
-    return Bowl3DView(key: ValueKey(antialias), antialias: antialias);
+    final maximized = ref.watch(viewMaximizedProvider);
+    // Recreate the GPU view when AA changes (a renderer-construction flag) or
+    // when the pane is maximized/restored — that's a layout-only size change,
+    // which three_js's resize path (driven by window metrics) would otherwise
+    // miss, leaving the camera aspect stale.
+    return Bowl3DView(
+      key: ValueKey('$antialias-$maximized'),
+      antialias: antialias,
+    );
   }
 }
 

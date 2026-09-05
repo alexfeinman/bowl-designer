@@ -183,7 +183,22 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
 
     return Stack(
       children: [
-        Positioned.fill(child: threeJs.build()),
+        // three_js sizes its GL texture and camera aspect from MediaQuery.size,
+        // which is the whole app window — but this view only occupies a pane.
+        // Override MediaQuery with the pane's real size so the texture and the
+        // camera aspect track the pane (no stretch), and so the package's
+        // window-resize path recomputes against the pane on every resize.
+        Positioned.fill(
+          child: LayoutBuilder(
+            builder: (ctx, constraints) {
+              final mq = MediaQuery.of(ctx);
+              return MediaQuery(
+                data: mq.copyWith(size: constraints.biggest),
+                child: threeJs.build(),
+              );
+            },
+          ),
+        ),
         Positioned(
           left: 14,
           bottom: 12,
