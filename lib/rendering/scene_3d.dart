@@ -280,13 +280,67 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
 
   final n = prof.ys.length;
   const eps = 0.05;
+  final gapBucket = bucket(-1, kGapMaterialId, _kGapColor);
 
-  // Outer wall — revolve the outer profile, tessellated by each course's arcs.
+  // A gap is a real slot cut through the wall: over its arc we skip the outer and
+  // bore surfaces and instead draw the slot's own faces (the two radial sides,
+  // plus horizontal caps at the course's top/bottom), so you can see through it.
+  // A radial slot side face at a fixed angle, spanning outer↔inner over one band.
+  void slotSide(int i, double ang) {
+    final ya = prof.ys[i], yb = prof.ys[i + 1];
+    final roa = prof.outerR[i], rob = prof.outerR[i + 1];
+    final ria = prof.innerR[i], rib = prof.innerR[i + 1];
+    final oA = pt(roa, ya, ang), iA = pt(ria, ya, ang);
+    final iB = pt(rib, yb, ang), oB = pt(rob, yb, ang);
+    emit(gapBucket, oA, 1.0, _uv(roa, ya));
+    emit(gapBucket, iA, 1.0, _uv(ria, ya));
+    emit(gapBucket, iB, 1.0, _uv(rib, yb));
+    emit(gapBucket, oA, 1.0, _uv(roa, ya));
+    emit(gapBucket, iB, 1.0, _uv(rib, yb));
+    emit(gapBucket, oB, 1.0, _uv(rob, yb));
+  }
+
+  // A horizontal cap (annular sector) closing a slot's top or bottom at sample
+  // [idx], across the gap's angular width.
+  void slotCap(int idx, double a0, double a1) {
+    final y = prof.ys[idx];
+    final ro = prof.outerR[idx];
+    final ri = prof.innerR[idx] > eps ? prof.innerR[idx] : 0.0;
+    final st = steps(a1 - a0);
+    for (var s = 0; s < st; s++) {
+      final c0 = a0 + (a1 - a0) * s / st, c1 = a0 + (a1 - a0) * (s + 1) / st;
+      emit(gapBucket, pt(ro, y, c0), 0.9, _uv(c0 * ro, ro));
+      emit(gapBucket, pt(ro, y, c1), 0.9, _uv(c1 * ro, ro));
+      emit(gapBucket, pt(ri, y, c1), 0.9, _uv(c1 * ri, ri));
+      emit(gapBucket, pt(ro, y, c0), 0.9, _uv(c0 * ro, ro));
+      emit(gapBucket, pt(ri, y, c1), 0.9, _uv(c1 * ri, ri));
+      emit(gapBucket, pt(ri, y, c0), 0.9, _uv(c0 * ri, ri));
+    }
+  }
+
+  bool isGap(String matId) => matId == kGapMaterialId;
+
+  // First and last profile sample of each course (its bottom/top boundary), for
+  // capping the slots.
+  final ringLoIdx = <int, int>{}, ringHiIdx = <int, int>{};
+  for (var i = 0; i < n; i++) {
+    final r = prof.ringAt[i];
+    ringLoIdx[r] = ringLoIdx.containsKey(r) ? math.min(ringLoIdx[r]!, i) : i;
+    ringHiIdx[r] = ringHiIdx.containsKey(r) ? math.max(ringHiIdx[r]!, i) : i;
+  }
+
+  // Outer wall — revolve the outer profile over segment arcs; gap arcs get slot
+  // side faces instead (a hole in the wall).
   for (var i = 0; i < n - 1; i++) {
     final ri = prof.ringAt[i];
     final ya = prof.ys[i], yb = prof.ys[i + 1];
     final ra = prof.outerR[i], rb = prof.outerR[i + 1];
     for (final (a0, a1, matId, baseCol, sh) in ringArcs[ri]) {
+      if (isGap(matId)) {
+        slotSide(i, a0);
+        slotSide(i, a1);
+        continue;
+      }
       final b = bucket(ri, matId, baseCol);
       final st = steps(a1 - a0);
       for (var s = 0; s < st; s++) {
@@ -296,14 +350,26 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
     }
   }
 
+  // Slot caps: close the top and bottom of each course's gaps (except where they
+  // open onto the rim above or the underside below).
+  for (var ri = 0; ri < rings.length; ri++) {
+    if (!ringLoIdx.containsKey(ri)) continue; // course too thin to sample
+    for (final (a0, a1, matId, _, _) in ringArcs[ri]) {
+      if (!isGap(matId)) continue;
+      if (ri > 0) slotCap(ringLoIdx[ri]!, a0, a1); // onto course below
+      if (ri < rings.length - 1) slotCap(ringHiIdx[ri]!, a0, a1); // course above
+    }
+  }
+
   // Bore — revolve the inner profile where it is open (above the floor). Wound
-  // the other way so the lit face points into the bore.
+  // the other way so the lit face points into the bore. Skips gap arcs (open).
   for (var i = 0; i < n - 1; i++) {
     if (prof.innerR[i] <= eps || prof.innerR[i + 1] <= eps) continue;
     final ri = prof.ringAt[i];
     final ya = prof.ys[i], yb = prof.ys[i + 1];
     final ra = prof.innerR[i], rb = prof.innerR[i + 1];
     for (final (a0, a1, matId, baseCol, sh) in ringArcs[ri]) {
+      if (isGap(matId)) continue;
       final b = bucket(ri, matId, baseCol);
       final st = steps(a1 - a0);
       for (var s = 0; s < st; s++) {
@@ -325,6 +391,7 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
     final yf = prof.ys[floorIdx];
     final rf = prof.innerR[floorIdx];
     for (final (a0, a1, matId, baseCol, sh) in ringArcs[0]) {
+      if (isGap(matId)) continue;
       final b = bucket(0, matId, baseCol);
       final st = steps(a1 - a0);
       for (var s = 0; s < st; s++) {
@@ -337,12 +404,14 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
   }
 
   // Rim: annulus joining the outer and inner tops, by the top course's arcs.
+  // Gap arcs are skipped, leaving a notch in the rim.
   final top = n - 1;
   final riTop = prof.ringAt[top];
   final roTop = prof.outerR[top], riBore = prof.innerR[top];
   if (riBore > eps) {
     final yTop = prof.ys[top];
     for (final (a0, a1, matId, baseCol, sh) in ringArcs[riTop]) {
+      if (isGap(matId)) continue;
       final b = bucket(riTop, matId, baseCol);
       final st = steps(a1 - a0);
       for (var s = 0; s < st; s++) {
@@ -360,6 +429,7 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
   // Underside disk at the base (base-course arcs, seen from below).
   final rBot = prof.outerR[0];
   for (final (a0, a1, matId, baseCol, sh) in ringArcs[0]) {
+    if (isGap(matId)) continue;
     final b = bucket(0, matId, baseCol);
     final st = steps(a1 - a0);
     for (var s = 0; s < st; s++) {
@@ -370,7 +440,7 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
     }
   }
 
-  final keys = buckets.keys.toList()
+  final keys = buckets.keys.where((k) => buckets[k]!.pos.isNotEmpty).toList()
     ..sort((a, b) {
       final ba = buckets[a]!, bb = buckets[b]!;
       final c = ba.ringIndex.compareTo(bb.ringIndex);

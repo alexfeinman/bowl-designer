@@ -84,10 +84,13 @@ void main() {
       }
     });
 
-    test('a gapped ring emits a distinct untextured glue-line bucket', () {
+    test('a gapped ring cuts a real slot (its own bucket with geometry)', () {
       final withGap = buildTurnedBowlTriangles(gapped());
-      expect(withGap.any((t) => t.materialId == kGapMaterialId), isTrue);
-      // A no-gap project has no glue-line buckets.
+      final slot = withGap.where((t) => t.materialId == kGapMaterialId);
+      expect(slot.isNotEmpty, isTrue);
+      // The slot has actual faces (side walls + caps), not just a coloured band.
+      expect(slot.first.positions.length, greaterThan(0));
+      // A no-gap project cuts no slots at all.
       final noGap = buildTurnedBowlTriangles(BowlProject.sample().copyWith(rings: [
         for (final r in BowlProject.sample().rings) r.copyWith(gapMm: 0.0),
       ]));
