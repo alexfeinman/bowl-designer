@@ -329,8 +329,12 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     }
     final target = three.WebGLRenderTarget(w, h);
     try {
+      // setRenderTarget applies the target's own (0,0,w,h) viewport in actual
+      // pixels. Do NOT call setViewport here: it re-scales by the renderer's
+      // pixelRatio (retina = 2×), which would blow the viewport up past the
+      // target and shove the scene into a corner. render() for a plain camera
+      // never resets the viewport, so that mistake would stick.
       r.setRenderTarget(target);
-      r.setViewport(0, 0, w.toDouble(), h.toDouble());
       r.clear();
       r.render(threeJs.scene, cam);
       final buf = three.Uint8Array(w * h * 4);
@@ -352,8 +356,8 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
       img.dispose();
       return png?.buffer.asUint8List();
     } finally {
+      // Restores the on-screen viewport (setFrom(_viewport).scale(pixelRatio)).
       r.setRenderTarget(null);
-      r.setViewport(0, 0, vw, vh);
       if (cam is three.PerspectiveCamera && savedAspect != null) {
         cam.aspect = savedAspect;
         cam.updateProjectionMatrix();
