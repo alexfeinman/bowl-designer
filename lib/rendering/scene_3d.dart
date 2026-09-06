@@ -14,6 +14,11 @@ import '../models/ring.dart';
 /// never stretches. Tune this one number to make the figure coarser/finer.
 const double grainTileMm = 90.0;
 
+/// Sentinel material id for a turned-bowl glue line (a gap). Its buffer is drawn
+/// flat and untextured (a dark line) by the 3D view — see [_kGapColor].
+const String kGapMaterialId = '__gap__';
+const int _kGapColor = 0xFF241812; // dark glue-line brown
+
 /// A flat polygon in world space (mm). For the GPU path each vertex carries a
 /// grayscale [shade] multiplier (lighting/darkening cues, species-independent)
 /// and a wood-grain UV; the segment's species is named by [materialId] and its
@@ -242,7 +247,6 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
   // One course's arcs: (a0, a1, materialId, baseColor, shade). Gaps become a
   // darker arc of the same species (the glue line), so the surface reads the
   // segments and gaps as in the glued-rings view.
-  const gapShade = 0.55;
   List<(double, double, String, int, double)> arcsFor(int ringIdx) {
     final r = rings[ringIdx];
     final segN = r.segmentCount;
@@ -259,8 +263,10 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
       final m = r.materialAt(i);
       if (gap > 1e-4) {
         arcs.add((base + gap / 2, base + slot - gap / 2, m.id, m.colorValue, 1.0));
-        arcs.add(
-            (base + slot - gap / 2, base + slot + gap / 2, m.id, m.colorValue, gapShade));
+        // The gap is a glue line: its own untextured, near-black bucket so it
+        // reads as a crisp line on any species instead of a faint band.
+        arcs.add((base + slot - gap / 2, base + slot + gap / 2, kGapMaterialId,
+            _kGapColor, 1.0));
       } else {
         arcs.add((base, base + slot, m.id, m.colorValue, 1.0));
       }

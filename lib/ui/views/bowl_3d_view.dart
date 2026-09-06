@@ -184,6 +184,8 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
       geo.setAttributeFromString(
           'uv', three.Float32BufferAttribute.fromList(rt.uvs, 2));
       geo.computeVertexNormals();
+      // A turned-bowl glue line is always a flat dark bucket, never textured.
+      final isGap = rt.materialId == kGapMaterialId;
       final assetId = WoodTextures.assetIdRaw(rt.materialId, rt.baseColor);
       final mat = three.MeshPhongMaterial.fromMap({
         'vertexColors': true,
@@ -192,7 +194,7 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
         'specular': grain ? 0x141414 : 0x0d0d0d,
         'emissive': 0x000000,
       });
-      if (grain) {
+      if (grain && !isGap) {
         // Grain photo × tint × grayscale shade. Tint is white for true-match
         // species and a hue shift for the reused exotics. The texture may still
         // be loading, in which case we show the tinted flat colour and attach
@@ -216,7 +218,7 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
       _ringMeshes.add(mesh);
       _ringMats.add(mat);
       _ringOfMat.add(rt.ringIndex);
-      _matAsset.add(assetId);
+      _matAsset.add(isGap ? kGapMaterialId : assetId);
     }
     _group = g;
     threeJs.scene.add(g);
@@ -233,6 +235,7 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     if (_disposed || !_builtGrain) return;
     var changed = false;
     for (var i = 0; i < _ringMats.length; i++) {
+      if (_matAsset[i] == kGapMaterialId) continue; // glue lines stay flat
       if (_ringMats[i].map != null) continue;
       final tex = WoodTextures.cached(_matAsset[i]);
       if (tex != null) {

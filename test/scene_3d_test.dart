@@ -84,6 +84,16 @@ void main() {
       }
     });
 
+    test('a gapped ring emits a distinct untextured glue-line bucket', () {
+      final withGap = buildTurnedBowlTriangles(gapped());
+      expect(withGap.any((t) => t.materialId == kGapMaterialId), isTrue);
+      // A no-gap project has no glue-line buckets.
+      final noGap = buildTurnedBowlTriangles(BowlProject.sample().copyWith(rings: [
+        for (final r in BowlProject.sample().rings) r.copyWith(gapMm: 0.0),
+      ]));
+      expect(noGap.any((t) => t.materialId == kGapMaterialId), isFalse);
+    });
+
     test('a uniform wall bores the surface further in than the glued bore', () {
       final withWall = buildTurnedBowlTriangles(gapped(), wallMm: 6);
       final auto = buildTurnedBowlTriangles(gapped());
