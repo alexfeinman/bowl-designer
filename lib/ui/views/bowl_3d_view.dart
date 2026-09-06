@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +12,7 @@ import '../../rendering/scene_3d.dart';
 import '../../rendering/trackpad_orbit_controls.dart';
 import '../../rendering/wood_textures.dart';
 import '../widgets/wood_icon.dart';
+import '../../state/file_saver.dart';
 import '../../state/project_controller.dart';
 import '../theme.dart';
 
@@ -300,6 +304,91 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     _requestRender();
   }
 
+  /// Render the current scene (current camera) into an offscreen target at [scale]×
+  /// the pane, read the pixels back, and encode a PNG. A platform view / GL texture
+  /// can't be captured with a RepaintBoundary, so we go through the renderer.
+  Future<Uint8List?> _capturePng({double scale = 2.0, int maxDim = 4096}) async {
+    final r = threeJs.renderer;
+    if (!_ready || _disposed || r == null) return null;
+    final vw = threeJs.width, vh = threeJs.height;
+    if (vw <= 0 || vh <= 0) return null;
+    var w = (vw * scale).round();
+    var h = (vh * scale).round();
+    final over = math.max(w, h) / maxDim;
+    if (over > 1) {
+      w = (w / over).round();
+      h = (h / over).round();
+    }
+
+    final cam = threeJs.camera;
+    double? savedAspect;
+    if (cam is three.PerspectiveCamera) {
+      savedAspect = cam.aspect;
+      cam.aspect = w / h;
+      cam.updateProjectionMatrix();
+    }
+    final target = three.WebGLRenderTarget(w, h);
+    try {
+      r.setRenderTarget(target);
+      r.setViewport(0, 0, w.toDouble(), h.toDouble());
+      r.clear();
+      r.render(threeJs.scene, cam);
+      final buf = three.Uint8Array(w * h * 4);
+      r.readRenderTargetPixels(target, 0, 0, w, h, buf);
+      final raw = Uint8List.fromList(buf.toDartList());
+      buf.dispose();
+      // GL's origin is bottom-left; flip rows so the PNG is upright.
+      final rowBytes = w * 4;
+      final flipped = Uint8List(w * h * 4);
+      for (var y = 0; y < h; y++) {
+        flipped.setRange(y * rowBytes, (y + 1) * rowBytes, raw,
+            (h - 1 - y) * rowBytes);
+      }
+      final completer = Completer<ui.Image>();
+      ui.decodeImageFromPixels(
+          flipped, w, h, ui.PixelFormat.rgba8888, completer.complete);
+      final img = await completer.future;
+      final png = await img.toByteData(format: ui.ImageByteFormat.png);
+      img.dispose();
+      return png?.buffer.asUint8List();
+    } finally {
+      r.setRenderTarget(null);
+      r.setViewport(0, 0, vw, vh);
+      if (cam is three.PerspectiveCamera && savedAspect != null) {
+        cam.aspect = savedAspect;
+        cam.updateProjectionMatrix();
+      }
+      target.dispose();
+      _requestRender(); // repaint the on-screen frame
+    }
+  }
+
+  Future<void> _exportPng() async {
+    final project = ref.read(projectProvider);
+    final safe = project.name.trim().isEmpty
+        ? 'bowl'
+        : project.name.trim().replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_');
+    final suffix = ref.read(turnedBowlProvider) ? 'turned' : '3d';
+    try {
+      final png = await _capturePng();
+      if (png == null) {
+        _snack('Could not capture the 3D view.');
+        return;
+      }
+      final ok = await saveBytes('$safe $suffix.png', png,
+          typeLabel: 'PNG image', extensions: ['png']);
+      if (ok) _snack('3D view exported.');
+    } catch (e) {
+      _snack('PNG export failed: $e');
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   /// Ray-pick a ring from an element-local pixel position (from the controls).
   void _pickAt(double x, double y) {
     if (!_ready || _ringMeshes.isEmpty) return;
@@ -396,16 +485,37 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
         Positioned(
           right: 12,
           bottom: 12,
-          child: TextButton(
-            onPressed: _resetView,
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.white.withValues(alpha: 0.85),
-              backgroundColor: Colors.white.withValues(alpha: 0.08),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            ),
-            child: Text('Reset view',
-                style: AppFonts.ui(
-                    const TextStyle(fontSize: 11.5, color: Colors.white))),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton.icon(
+                onPressed: _exportPng,
+                icon: const Icon(Icons.image_outlined,
+                    size: 15, color: Colors.white),
+                label: Text('Export PNG',
+                    style: AppFonts.ui(
+                        const TextStyle(fontSize: 11.5, color: Colors.white))),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white.withValues(alpha: 0.85),
+                  backgroundColor: Colors.white.withValues(alpha: 0.08),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: _resetView,
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white.withValues(alpha: 0.85),
+                  backgroundColor: Colors.white.withValues(alpha: 0.08),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                ),
+                child: Text('Reset view',
+                    style: AppFonts.ui(
+                        const TextStyle(fontSize: 11.5, color: Colors.white))),
+              ),
+            ],
           ),
         ),
       ],
