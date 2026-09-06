@@ -7,7 +7,4 @@
 4. ✅ Material pattern rows have reorder drag handles, like the ring stack.
 5. ✅ X-ray: a finished-wall-thickness control previews a uniform turned wall on every course except the bottom (the floor).
 6. ✅ 3D "Show turned" toggle renders the finished (turned) bowl — the wireframe wall revolved — sharing the X-ray wall setting so the two previews match.
-
-## Open
-7. Add option to use photorealistic wood grain.
-   - Plan: per-species procedural grain texture (canvas → three.Texture), planar/cylindrical UVs on the ring, stave and turned meshes, gated behind a Settings toggle (persisted on the project like antialias). Larger, dedicated task.
+7. ✅ Photorealistic wood grain: a Settings "Wood grain" toggle (persisted on the project) overlays photographic per-species grain on the 3D bowl. Bundled CC0 diffuse maps (Poly Haven) per species; exotics without a CC0 match reuse the closest grain + a hue tint. Geometry buckets by (ring, species) with world-mm UVs (grain scaled to real segment size); textures decoded from assets → DataTexture, shared/cached. Works on the glued-rings and turned-bowl views.
