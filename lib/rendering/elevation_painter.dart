@@ -58,6 +58,7 @@ class ElevationPainter extends CustomPainter {
     final l = _layout(project, size);
     if (l == null) return;
     final scale = l.scale, cx = l.cx;
+    final rotations = project.ringRotationsRad();
 
     var y = l.baseY;
     for (var ringIndex = 0; ringIndex < project.rings.length; ringIndex++) {
@@ -71,8 +72,8 @@ class ElevationPainter extends CustomPainter {
       final n = ring.segmentCount;
       final slot = 2 * math.pi / n;
       final half = ring.gapMm / 2 * scale; // flat gap half-width in px
-      // Flat wedges brick-bond (half-segment stagger); staves stand in line.
-      final rot = isStave ? 0.0 : ringIndex * (math.pi / n);
+      // Per-course rotation about the axis (see BowlProject.ringRotationsRad).
+      final rot = rotations[ringIndex];
       double chord(double r) => math.sqrt(math.max(0.0, r * r - half * half));
       final soB = chord(roB), soT = chord(roT);
 

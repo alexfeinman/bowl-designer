@@ -16,5 +16,16 @@ void main() {
       final json = BowlProject.sample().toJson()..remove('antialias3d');
       expect(BowlProject.fromJson(json).antialias3d, isFalse);
     });
+
+    test('per-ring rotationDeg round-trips (null stays auto)', () {
+      final p = BowlProject.sample();
+      final withRot = p.copyWith(rings: [
+        for (var i = 0; i < p.rings.length; i++)
+          i == 1 ? p.rings[i].copyWith(rotationDeg: 7.5) : p.rings[i],
+      ]);
+      final back = BowlProject.fromJson(withRot.toJson());
+      expect(back.rings[1].rotationDeg, closeTo(7.5, 1e-9));
+      expect(back.rings[0].rotationDeg, isNull); // untouched stays auto
+    });
   });
 }

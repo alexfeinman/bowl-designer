@@ -227,6 +227,9 @@ class _Dimensions extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
     final ctrl = ref.read(projectControllerProvider.notifier);
+    final rings = ref.watch(projectProvider).rings;
+    // The bottom course is the rotation datum, so it has no "relative to below".
+    final isBottom = rings.isNotEmpty && rings.first.id == ring.id;
     final miter = ring.isSolid
         ? '—'
         : '${RingGeometry.miterForRing(ring).toStringAsFixed(2)}°';
@@ -283,6 +286,16 @@ class _Dimensions extends ConsumerWidget {
             onChanged: (mm) => ctrl.updateRing(
                 ring.id, (r) => r.copyWith(gapMm: mm.clamp(0.0, 100000.0))),
           ),
+        if (!isBottom && !ring.isSolid)
+          _AngleRow(
+            label: 'Rotation vs below',
+            valueDeg: ring.effectiveRotationDeg,
+            isAuto: ring.rotationDeg == null,
+            onChanged: (deg) => ctrl.updateRing(ring.id,
+                (r) => r.copyWith(rotationDeg: deg.clamp(-360.0, 360.0))),
+            onAuto: () =>
+                ctrl.updateRing(ring.id, (r) => r.copyWith(rotationDeg: null)),
+          ),
         const SizedBox(height: 6),
         Text.rich(
           TextSpan(
@@ -338,6 +351,65 @@ class _DimRow extends StatelessWidget {
             ),
             onMinus: () => onChanged((valueMm - step).clamp(0.0, 1e9)),
             onPlus: () => onChanged(valueMm + step),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A rotation field in degrees (not unit-converted), with an "auto" reset back
+/// to the default half-segment stagger.
+class _AngleRow extends StatelessWidget {
+  const _AngleRow({
+    required this.label,
+    required this.valueDeg,
+    required this.isAuto,
+    required this.onChanged,
+    required this.onAuto,
+  });
+  final String label;
+  final double valueDeg;
+  final bool isAuto;
+  final ValueChanged<double> onChanged;
+  final VoidCallback onAuto;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: _FieldLabel(label: label, hint: isAuto ? 'AUTO' : null)),
+              if (!isAuto)
+                InkWell(
+                  onTap: onAuto,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    child: Text('reset to auto',
+                        style: AppFonts.ui(
+                            TextStyle(fontSize: 10, color: c.accent))),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          _Stepper(
+            child: _NumField(
+              text: valueDeg.toStringAsFixed(1),
+              suffix: '°',
+              onSubmit: (v) {
+                final parsed = double.tryParse(v);
+                if (parsed != null) onChanged(parsed);
+              },
+            ),
+            onMinus: () => onChanged(valueDeg - 1),
+            onPlus: () => onChanged(valueDeg + 1),
           ),
         ],
       ),

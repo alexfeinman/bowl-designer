@@ -22,6 +22,7 @@ const _light = [0.35, 0.82, 0.45];
 List<_Face> _buildFaces(BowlProject project) {
   final faces = <_Face>[];
   final totalH = project.totalHeightMm;
+  final rotations = project.ringRotationsRad();
   var y = -totalH / 2;
 
   for (var ri = 0; ri < project.rings.length; ri++) {
@@ -40,9 +41,9 @@ List<_Face> _buildFaces(BowlProject project) {
     final n = ring.segmentCount;
     final slot = 2 * math.pi / n;
     final half = ring.gapMm / 2; // flat gap: each face offset in by half
-    // Flat wedges brick-bond with a half-segment stagger per course; staves
-    // (vertical boards) stand in line, so no stagger.
-    final rot = isStave ? 0.0 : ri * (math.pi / n);
+    // Per-course rotation about the axis (brick-bond stagger), relative to the
+    // course below; see BowlProject.ringRotationsRad.
+    final rot = rotations[ri];
     double chord(double r) => math.sqrt(math.max(0.0, r * r - half * half));
     final soB = chord(roB), soT = chord(roT);
     final siB = riB > 0 ? chord(riB) : 0.0;
@@ -145,12 +146,13 @@ Color _darken(Color c, double t) => Color.lerp(c, const Color(0xFF000000), t)!;
 /// Vertical facets carry the segment materials as stripes, approximating how the
 /// glue-up shows on the turned surface.
 List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
-    {double? wallMm, int radial = 64, int samples = 120}) {
+    {double? wallMm, int samples = 120}) {
   final prof = computeWallProfile(project, wallMm: wallMm, samples: samples);
   final totalH = project.totalHeightMm;
   final y0 = -totalH / 2;
   final rings = project.rings;
   if (rings.isEmpty) return const [];
+  final rotations = project.ringRotationsRad();
 
   final pos = <int, List<double>>{};
   final col = <int, List<double>>{};
@@ -161,12 +163,6 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
 
   vm.Vector3 pt(double r, double yMm, double ang) =>
       vm.Vector3(r * math.cos(ang), y0 + yMm, r * math.sin(ang));
-  final step = 2 * math.pi / radial;
-
-  Color matAt(int ringIdx, int j) {
-    final r = rings[ringIdx.clamp(0, rings.length - 1)];
-    return r.materialAt(j % r.segmentCount).color;
-  }
 
   void quad(int ri, vm.Vector3 a, vm.Vector3 b, vm.Vector3 c, vm.Vector3 d,
       Color color) {
@@ -178,19 +174,53 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
     emit(ri, d, color);
   }
 
+  // Colour arcs around one course, honouring its rotation and gaps — the same
+  // segment layout the glued-rings view shows. A gap becomes a thin dark arc
+  // (the glue line), so the turned surface reads the segments and gaps.
+  const gapShade = 0.34;
+  List<(double, double, Color)> arcsFor(int ringIdx) {
+    final r = rings[ringIdx];
+    final segN = r.segmentCount;
+    final rot = rotations[ringIdx];
+    if (segN <= 1) {
+      return [(rot, rot + 2 * math.pi, r.materialAt(0).color)];
+    }
+    final slot = 2 * math.pi / segN;
+    final gap = r.gapAngle; // radians
+    final arcs = <(double, double, Color)>[];
+    for (var i = 0; i < segN; i++) {
+      final base = rot + i * slot;
+      final mat = r.materialAt(i).color;
+      if (gap > 1e-4) {
+        arcs.add((base + gap / 2, base + slot - gap / 2, mat));
+        arcs.add((base + slot - gap / 2, base + slot + gap / 2,
+            _darken(mat, gapShade)));
+      } else {
+        arcs.add((base, base + slot, mat));
+      }
+    }
+    return arcs;
+  }
+
+  final ringArcs = [for (var i = 0; i < rings.length; i++) arcsFor(i)];
+  const facetStep = 2 * math.pi / 96; // circumferential smoothness
+  int steps(double w) => math.max(1, (w / facetStep).ceil());
+
   final n = prof.ys.length;
   const eps = 0.05;
 
-  // Outer wall — revolve the outer profile over the whole height.
+  // Outer wall — revolve the outer profile, tessellated by each course's arcs.
   for (var i = 0; i < n - 1; i++) {
     final ri = prof.ringAt[i];
     final ya = prof.ys[i], yb = prof.ys[i + 1];
     final ra = prof.outerR[i], rb = prof.outerR[i + 1];
-    for (var j = 0; j < radial; j++) {
-      final a0 = j * step, a1 = (j + 1) * step;
-      final color = _darken(matAt(ri, j), 0.02);
-      quad(ri, pt(ra, ya, a0), pt(rb, yb, a0), pt(rb, yb, a1), pt(ra, ya, a1),
-          color);
+    for (final (a0, a1, color) in ringArcs[ri]) {
+      final st = steps(a1 - a0);
+      for (var s = 0; s < st; s++) {
+        final b0 = a0 + (a1 - a0) * s / st, b1 = a0 + (a1 - a0) * (s + 1) / st;
+        quad(ri, pt(ra, ya, b0), pt(rb, yb, b0), pt(rb, yb, b1), pt(ra, ya, b1),
+            _darken(color, 0.02));
+      }
     }
   }
 
@@ -200,16 +230,18 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
     final ri = prof.ringAt[i];
     final ya = prof.ys[i], yb = prof.ys[i + 1];
     final ra = prof.innerR[i], rb = prof.innerR[i + 1];
-    for (var j = 0; j < radial; j++) {
-      final a0 = j * step, a1 = (j + 1) * step;
-      final color = _darken(matAt(ri, j), 0.14);
-      // Wound the other way so the lit face points into the bore.
-      quad(ri, pt(ra, ya, a1), pt(rb, yb, a1), pt(rb, yb, a0), pt(ra, ya, a0),
-          color);
+    for (final (a0, a1, color) in ringArcs[ri]) {
+      final st = steps(a1 - a0);
+      for (var s = 0; s < st; s++) {
+        final b0 = a0 + (a1 - a0) * s / st, b1 = a0 + (a1 - a0) * (s + 1) / st;
+        // Wound the other way so the lit face points into the bore.
+        quad(ri, pt(ra, ya, b1), pt(rb, yb, b1), pt(rb, yb, b0), pt(ra, ya, b0),
+            _darken(color, 0.14));
+      }
     }
   }
 
-  // Inside floor: a disk where the bore first opens.
+  // Inside floor: a pie disk (base-course arcs) where the bore first opens.
   var floorIdx = -1;
   for (var i = 0; i < n; i++) {
     if (prof.innerR[i] > eps) {
@@ -220,37 +252,46 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
   if (floorIdx > 0) {
     final yf = prof.ys[floorIdx];
     final rf = prof.innerR[floorIdx];
-    final cFloor = _lighten(matAt(0, 0), 0.06);
-    for (var j = 0; j < radial; j++) {
-      final a0 = j * step, a1 = (j + 1) * step;
-      emit(0, pt(0, yf, 0), cFloor);
-      emit(0, pt(rf, yf, a0), cFloor);
-      emit(0, pt(rf, yf, a1), cFloor);
+    for (final (a0, a1, color) in ringArcs[0]) {
+      final st = steps(a1 - a0);
+      final c = _lighten(color, 0.06);
+      for (var s = 0; s < st; s++) {
+        final b0 = a0 + (a1 - a0) * s / st, b1 = a0 + (a1 - a0) * (s + 1) / st;
+        emit(0, pt(0, yf, 0), c);
+        emit(0, pt(rf, yf, b0), c);
+        emit(0, pt(rf, yf, b1), c);
+      }
     }
   }
 
-  // Rim: annulus joining the outer and inner tops.
+  // Rim: annulus joining the outer and inner tops, by the top course's arcs.
   final top = n - 1;
   final riTop = prof.ringAt[top];
   final roTop = prof.outerR[top], riBore = prof.innerR[top];
   if (riBore > eps) {
     final yTop = prof.ys[top];
-    for (var j = 0; j < radial; j++) {
-      final a0 = j * step, a1 = (j + 1) * step;
-      final color = _lighten(matAt(riTop, j), 0.05);
-      quad(riTop, pt(riBore, yTop, a0), pt(roTop, yTop, a0),
-          pt(roTop, yTop, a1), pt(riBore, yTop, a1), color);
+    for (final (a0, a1, color) in ringArcs[riTop]) {
+      final st = steps(a1 - a0);
+      final c = _lighten(color, 0.05);
+      for (var s = 0; s < st; s++) {
+        final b0 = a0 + (a1 - a0) * s / st, b1 = a0 + (a1 - a0) * (s + 1) / st;
+        quad(riTop, pt(riBore, yTop, b0), pt(roTop, yTop, b0),
+            pt(roTop, yTop, b1), pt(riBore, yTop, b1), c);
+      }
     }
   }
 
-  // Underside disk at the base.
+  // Underside disk at the base (base-course arcs, seen from below).
   final rBot = prof.outerR[0];
-  final cBot = _darken(matAt(0, 0), 0.2);
-  for (var j = 0; j < radial; j++) {
-    final a0 = j * step, a1 = (j + 1) * step;
-    emit(0, pt(0, prof.ys[0], 0), cBot);
-    emit(0, pt(rBot, prof.ys[0], a1), cBot);
-    emit(0, pt(rBot, prof.ys[0], a0), cBot);
+  for (final (a0, a1, color) in ringArcs[0]) {
+    final st = steps(a1 - a0);
+    final c = _darken(color, 0.2);
+    for (var s = 0; s < st; s++) {
+      final b0 = a0 + (a1 - a0) * s / st, b1 = a0 + (a1 - a0) * (s + 1) / st;
+      emit(0, pt(0, prof.ys[0], 0), c);
+      emit(0, pt(rBot, prof.ys[0], b1), c);
+      emit(0, pt(rBot, prof.ys[0], b0), c);
+    }
   }
 
   final ids = pos.keys.toList()..sort();

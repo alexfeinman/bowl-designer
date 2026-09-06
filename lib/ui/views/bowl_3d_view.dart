@@ -47,7 +47,7 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     threeJs = three.ThreeJS(
       onSetupComplete: () {
         setState(() => _ready = true);
-        _requestRender();
+        _warmup(90); // render across init/layout/texture settling, then idle
       },
       setup: _setup,
       // Render on demand (see _pump) instead of every ticker frame, so an idle
@@ -74,6 +74,16 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     _schedulePump();
   }
 
+  /// Render on each of the next [frames] frames. The platform view's real size
+  /// (and the GL texture) can settle a beat after setup — the on-demand loop
+  /// would otherwise present one early, wrongly-sized frame and then idle,
+  /// leaving the view blank. This carries it through the settle, then stops.
+  void _warmup(int frames) {
+    if (_disposed || frames <= 0) return;
+    _requestRender();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _warmup(frames - 1));
+  }
+
   void _schedulePump() {
     if (_pumpScheduled || _rendering || _disposed) return;
     _pumpScheduled = true;
@@ -90,7 +100,12 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     _rendering = true;
     _dirty = false;
     final moving = _controls?.update() ?? false;
-    await threeJs.render();
+    try {
+      await threeJs.render();
+    } catch (_) {
+      // A transient GL/init hiccup shouldn't kill the pump; try again next frame.
+      _dirty = true;
+    }
     _rendering = false;
     if (_disposed) return;
     if (moving || _dirty) _schedulePump();
@@ -117,6 +132,9 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
       ..dampingFactor = 0.08;
     // Render only when the camera actually changes (drag / zoom / damping ease).
     _controls!.addEventListener('change', _onControlsChange);
+    // Re-render when the view is resized (also nudges the first correctly-sized
+    // frame once the platform view settles).
+    threeJs.windowResizeUpdate = (_) => _requestRender();
 
     _builtTurned = ref.read(turnedBowlProvider);
     _builtWall = ref.read(xrayWallProvider);

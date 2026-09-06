@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'material.dart';
 import 'ring.dart';
 import 'units.dart';
@@ -41,6 +43,20 @@ class BowlProject {
       ? 0.0
       : rings.map((r) => r.maxReachOuterDiameter).reduce((a, b) => a > b ? a : b);
   int get totalSegments => rings.fold(0, (a, r) => a + r.physicalSegmentCount);
+
+  /// Absolute rotation (radians) of each course about the axis, bottom→top.
+  /// The bottom course is the datum (0); each course above adds its rotation
+  /// relative to the one below it (default: half a segment), so courses
+  /// brick-bond by default. Shared by every view so they stay consistent.
+  List<double> ringRotationsRad() {
+    final out = <double>[];
+    var acc = 0.0;
+    for (var i = 0; i < rings.length; i++) {
+      if (i > 0) acc += rings[i].effectiveRotationDeg * math.pi / 180.0;
+      out.add(acc);
+    }
+    return out;
+  }
 
   BowlProject copyWith({
     String? name,

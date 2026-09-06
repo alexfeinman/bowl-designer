@@ -26,6 +26,9 @@ enum RingType {
       };
 }
 
+/// Sentinel for [Ring.copyWith] so a nullable field can be set back to null.
+const Object _unset = Object();
+
 /// A single course in the bowl, immutable. Diameters and thickness are stored
 /// in canonical millimetres.
 class Ring {
@@ -39,6 +42,7 @@ class Ring {
     required this.segmentCount,
     this.gapMm = 0.0,
     this.wallAngle = 0.0,
+    this.rotationDeg,
     this.pattern = const [WoodLibrary.maple, WoodLibrary.walnut],
     this.overrides = const {},
   });
@@ -66,6 +70,19 @@ class Ring {
 
   /// Wall tilt in degrees for [RingType.compound]; 0 otherwise.
   final double wallAngle;
+
+  /// Rotation of this course about the axis, in degrees, *relative to the course
+  /// below it* — the brick-bond stagger. Null means auto: half a segment
+  /// ([halfSegmentDeg]), the classic offset. The bottom course is the datum and
+  /// ignores this.
+  final double? rotationDeg;
+
+  /// Angular width of half a segment, in degrees (the default stagger).
+  double get halfSegmentDeg => segmentCount <= 1 ? 0.0 : 180.0 / segmentCount;
+
+  /// Effective rotation relative to the course below (degrees): the stored
+  /// value, or half a segment when unset.
+  double get effectiveRotationDeg => rotationDeg ?? halfSegmentDeg;
 
   /// Repeating material sequence applied around the ring.
   final List<SegmentMaterial> pattern;
@@ -138,6 +155,8 @@ class Ring {
     int? segmentCount,
     double? gapMm,
     double? wallAngle,
+    // Sentinel default lets callers set rotation back to null (auto).
+    Object? rotationDeg = _unset,
     List<SegmentMaterial>? pattern,
     Map<int, SegmentMaterial>? overrides,
   }) =>
@@ -151,6 +170,9 @@ class Ring {
         segmentCount: segmentCount ?? this.segmentCount,
         gapMm: gapMm ?? this.gapMm,
         wallAngle: wallAngle ?? this.wallAngle,
+        rotationDeg: identical(rotationDeg, _unset)
+            ? this.rotationDeg
+            : rotationDeg as double?,
         pattern: pattern ?? this.pattern,
         overrides: overrides ?? this.overrides,
       );
@@ -165,6 +187,7 @@ class Ring {
         'segmentCount': segmentCount,
         'gapMm': gapMm,
         'wallAngle': wallAngle,
+        'rotationDeg': rotationDeg,
         'pattern': pattern.map((m) => m.toJson()).toList(),
         'overrides':
             overrides.map((k, v) => MapEntry(k.toString(), v.toJson())),
@@ -183,6 +206,7 @@ class Ring {
         segmentCount: (json['segmentCount'] as num).toInt(),
         gapMm: (json['gapMm'] as num?)?.toDouble() ?? 0.0,
         wallAngle: (json['wallAngle'] as num?)?.toDouble() ?? 0.0,
+        rotationDeg: (json['rotationDeg'] as num?)?.toDouble(),
         pattern: [
           for (final m in (json['pattern'] as List? ?? const []))
             SegmentMaterial.fromJson(m as Map<String, dynamic>)

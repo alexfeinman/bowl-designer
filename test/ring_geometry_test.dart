@@ -185,6 +185,42 @@ void main() {
     });
   });
 
+  group('ring rotations', () {
+    Ring r(String id, {int n = 12, double? rot}) => Ring(
+          id: id,
+          name: id,
+          type: RingType.normal,
+          outerDiameter: 200,
+          innerDiameter: 160,
+          thickness: 20,
+          segmentCount: n,
+          rotationDeg: rot,
+        );
+
+    test('default is half a segment relative to the ring below', () {
+      final p = BowlProject(name: 't', rings: [r('a'), r('b'), r('c')]);
+      final rots = p.ringRotationsRad();
+      final half = math.pi / 12; // 180/n in radians
+      expect(rots[0], closeTo(0.0, 1e-9)); // bottom is the datum
+      expect(rots[1], closeTo(half, 1e-9));
+      expect(rots[2], closeTo(2 * half, 1e-9));
+    });
+
+    test('explicit rotation overrides and accumulates', () {
+      final p = BowlProject(
+          name: 't', rings: [r('a'), r('b', rot: 10), r('c', rot: 0)]);
+      final rots = p.ringRotationsRad();
+      expect(rots[0], closeTo(0.0, 1e-9));
+      expect(rots[1], closeTo(10 * math.pi / 180, 1e-9));
+      expect(rots[2], closeTo(10 * math.pi / 180, 1e-9)); // +0 vs below
+    });
+
+    test('effectiveRotationDeg falls back to half segment', () {
+      expect(r('a', n: 8).effectiveRotationDeg, closeTo(22.5, 1e-9));
+      expect(r('a', n: 8, rot: 5).effectiveRotationDeg, closeTo(5, 1e-9));
+    });
+  });
+
   group('auto-fit walls', () {
     final project = BowlProject.sample();
 
