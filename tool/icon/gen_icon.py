@@ -1,148 +1,107 @@
 #!/usr/bin/env python3
-"""Generate the Segmented Bowl Designer app icon as SVG variants.
-
-A top-down view of a segmented turned bowl: an amber rim, concentric courses of
-brick-bonded wood wedges (maple / walnut with a padauk accent course), lightening
-toward the centre to read as a concave bowl, on a warm espresso ground.
-"""
+"""App icon: flat, bold-outlined 3/4 checkered segmented bowl (line-icon style)."""
 import math
 
-# ---- palette -----------------------------------------------------------------
-BG_C = "#4a3421"; BG_M = "#2c1f15"; BG_E = "#160e08"   # radial ground
-RIM_HI = "#ecb75f"; RIM_LO = "#c07f2c"                  # amber bowl edge
-MAPLE = (0xE8, 0xD5, 0xA8)
-WALNUT = (0x6A, 0x49, 0x31)
-PADAUK = (0xB5, 0x53, 0x2A)
-GLUE = "#140c07"
+INK = "#2b2115"      # outline
+MAPLE = "#ecd9ac"
+OAK = "#c6883a"
+WALNUT = "#6f4a2f"
+CREAM = "#f4ecdb"    # interior / tile
+TILE = "#f6eeddff"
 
+def P(cx, cy, R, H, phi, tilt):
+    return (cx + R*math.cos(phi), cy + H + R*math.sin(phi)*tilt)
 
-def lighten(rgb, t):
-    return tuple(round(c + (255 - c) * t) for c in rgb)
+def path_pts(pts, close=True):
+    d = "M" + " L".join(f"{x:.1f} {y:.1f}" for x, y in pts)
+    return d + (" Z" if close else "")
 
-def hexc(rgb):
-    return "#%02x%02x%02x" % rgb
+def bowl(cx, cy, Rx, tilt=0.34, framing="tile"):
+    """Flat checker clipped to the bowl outline, with a cream opening + bold ink."""
+    depth = Rx*1.16
+    tmax = math.radians(74)
+    def R(t): return Rx*math.cos(t)
+    def H(t): return depth*math.sin(t)
+    o = []
+    Rb, Hb = R(tmax), H(tmax)
+    Lx, Ly = cx-Rx, cy
+    Rxr, Ryr = cx+Rx, cy
+    blx, bly = cx-Rb, cy+Hb
+    brx, bry = cx+Rb, cy+Hb
+    yBot = cy + Hb + Rb*tilt
+    sil = (f"M{Lx:.1f} {Ly:.1f} "
+           f"C{cx-Rx*1.03:.1f} {cy+depth*0.52:.1f} {cx-Rb*1.18:.1f} {cy+Hb*0.86:.1f} {blx:.1f} {bly:.1f} "
+           f"A{Rb:.1f} {Rb*tilt:.1f} 0 0 0 {brx:.1f} {bry:.1f} "
+           f"C{cx+Rb*1.18:.1f} {cy+Hb*0.86:.1f} {cx+Rx*1.03:.1f} {cy+depth*0.52:.1f} {Rxr:.1f} {Ryr:.1f} "
+           f"A{Rx:.1f} {Rx*tilt:.1f} 0 0 1 {Lx:.1f} {Ly:.1f} Z")
 
+    o.append(f'<clipPath id="body"><path d="{sil}"/></clipPath>')
+    o.append(f'<path d="{sil}" fill="{CREAM}"/>')
 
-def sector(cx, cy, r0, r1, a0, a1):
-    """Annular-sector path from radius r0..r1 over angle a0..a1 (radians)."""
-    x0o, y0o = cx + r1 * math.cos(a0), cy + r1 * math.sin(a0)
-    x1o, y1o = cx + r1 * math.cos(a1), cy + r1 * math.sin(a1)
-    x1i, y1i = cx + r0 * math.cos(a1), cy + r0 * math.sin(a1)
-    x0i, y0i = cx + r0 * math.cos(a0), cy + r0 * math.sin(a0)
-    large = 1 if (a1 - a0) > math.pi else 0
-    return (f"M{x0o:.2f} {y0o:.2f} A{r1:.2f} {r1:.2f} 0 {large} 1 {x1o:.2f} {y1o:.2f} "
-            f"L{x1i:.2f} {y1i:.2f} A{r0:.2f} {r0:.2f} 0 {large} 0 {x0i:.2f} {y0i:.2f} Z")
+    # Rectangular checkerboard clipped to the bowl (flat, like the reference).
+    NC = 7                                  # columns across the width
+    yTop = cy - Rx*tilt                     # from the top of the rim ellipse
+    NR = 5                                  # rows down the body
+    cw = (2*Rx)/NC
+    rh = (yBot - yTop)/NR
+    cw_stroke = Rx*0.022
+    o.append('<g clip-path="url(#body)">')
+    for r in range(NR):
+        for c in range(NC):
+            x = cx - Rx + c*cw
+            y = yTop + r*rh
+            # Cream / dark checker; dark cells alternate oak-orange and walnut.
+            if (r + c) % 2 == 0:
+                col = MAPLE
+            else:
+                col = OAK if ((r + c) // 2 + r) % 2 == 0 else WALNUT
+            o.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{cw+1:.1f}" height="{rh+1:.1f}" '
+                     f'fill="{col}" stroke="{INK}" stroke-width="{cw_stroke:.1f}"/>')
+    o.append('</g>')
 
+    # Interior opening (cream) carves the top → an empty bowl, drawn over the checker.
+    o.append(f'<ellipse cx="{cx:.1f}" cy="{cy:.1f}" rx="{Rx*0.9:.1f}" ry="{Rx*0.9*tilt:.1f}" '
+             f'fill="{CREAM}"/>')
+    # Far inner wall shadow at the back of the opening.
+    ri = Rx*0.9  # noqa
+    il = P(cx, cy, ri, 0, math.pi, tilt); ir = P(cx, cy, ri, 0, 0, tilt)
+    o.append(f'<path d="M{il[0]:.1f} {il[1]:.1f} A{ri:.1f} {ri*tilt:.1f} 0 0 0 '
+             f'{ir[0]:.1f} {ir[1]:.1f}" fill="none" stroke="#dcc7a1" '
+             f'stroke-width="{Rx*0.11:.1f}" opacity="0.7"/>')
 
-def bowl_art(cx, cy, R):
-    """The segmented-bowl motif centred at (cx,cy) with outer radius R."""
-    out = []
-    # Rim (bowl edge) — amber annulus.
-    rim_in = R * 0.80
-    out.append(f'<circle cx="{cx}" cy="{cy}" r="{R}" fill="url(#rim)"/>')
-    # Faint glue ring under the rim inner edge.
-    out.append(f'<circle cx="{cx}" cy="{cy}" r="{rim_in}" fill="{GLUE}"/>')
+    # Bold outlines: opening rim + full silhouette.
+    sw = Rx*0.055
+    o.append(f'<ellipse cx="{cx:.1f}" cy="{cy:.1f}" rx="{Rx:.1f}" ry="{Rx*tilt:.1f}" '
+             f'fill="none" stroke="{INK}" stroke-width="{sw:.1f}"/>')
+    o.append(f'<path d="{sil}" fill="none" stroke="{INK}" stroke-width="{sw:.1f}" '
+             f'stroke-linejoin="round"/>')
+    return "\n".join(o), sil
 
-    # Concentric courses, outer→inner. (r_outer, r_inner, colA, colB, seg, offset)
-    courses = [
-        (0.795, 0.630, MAPLE, WALNUT),
-        (0.618, 0.470, WALNUT, PADAUK),
-        (0.458, 0.320, MAPLE, WALNUT),
-        (0.308, 0.170, WALNUT, MAPLE),
-    ]
-    seg = 16
-    step = 2 * math.pi / seg
-    gap = 0.045          # angular glue gap (radians)
-    for i, (ro, ri, ca, cb) in enumerate(courses):
-        ro *= R; ri *= R
-        offset = (i * step / 2) - math.pi / 2   # brick-bond stagger; start at top
-        # Concavity: lighten toward the centre.
-        t = 0.04 + 0.16 * i
-        for k in range(seg):
-            a0 = k * step + offset + gap / 2
-            a1 = (k + 1) * step + offset - gap / 2
-            base = ca if k % 2 == 0 else cb
-            col = hexc(lighten(base, t))
-            out.append(f'<path d="{sector(cx, cy, ri, ro, a0, a1)}" fill="{col}"/>')
-
-    # Centre: a small segmented disk (the glued base) — 8 pie wedges.
-    hub = R * 0.170
-    out.append(f'<circle cx="{cx}" cy="{cy}" r="{hub*1.03:.2f}" fill="{GLUE}"/>')
-    n = 8; st = 2 * math.pi / n
-    for k in range(n):
-        a0 = k * st - math.pi / 2 + 0.02
-        a1 = (k + 1) * st - math.pi / 2 - 0.02
-        base = MAPLE if k % 2 == 0 else WALNUT
-        col = hexc(lighten(base, 0.34))
-        out.append(f'<path d="{sector(cx, cy, 0.0, hub, a0, a1)}" fill="{col}"/>')
-
-    # Concavity shade + top-left specular, clipped to the bowl.
-    out.append(f'<circle cx="{cx}" cy="{cy}" r="{R}" fill="url(#concave)"/>')
-    out.append(f'<circle cx="{cx}" cy="{cy}" r="{R}" fill="url(#spec)"/>')
-    # Thin dark outline to seat the bowl on the ground.
-    out.append(f'<circle cx="{cx}" cy="{cy}" r="{R-1}" fill="none" '
-               f'stroke="#0d0805" stroke-width="{R*0.012:.2f}" opacity="0.55"/>')
-    return "\n".join(out)
-
-
-DEFS = f'''<defs>
-  <radialGradient id="ground" cx="38%" cy="32%" r="80%">
-    <stop offset="0%" stop-color="{BG_C}"/>
-    <stop offset="52%" stop-color="{BG_M}"/>
-    <stop offset="100%" stop-color="{BG_E}"/>
-  </radialGradient>
-  <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0%" stop-color="{RIM_HI}"/>
-    <stop offset="100%" stop-color="{RIM_LO}"/>
-  </linearGradient>
-  <radialGradient id="concave" cx="50%" cy="50%" r="50%">
-    <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
-    <stop offset="62%" stop-color="#000000" stop-opacity="0"/>
-    <stop offset="88%" stop-color="#000000" stop-opacity="0.30"/>
-    <stop offset="100%" stop-color="#000000" stop-opacity="0.52"/>
-  </radialGradient>
-  <radialGradient id="spec" cx="34%" cy="28%" r="46%">
-    <stop offset="0%" stop-color="#ffffff" stop-opacity="0.26"/>
-    <stop offset="55%" stop-color="#ffffff" stop-opacity="0.05"/>
-    <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-  </radialGradient>
-  <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
-    <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000000" flood-opacity="0.45"/>
-  </filter>
-</defs>'''
-
-
-def svg(body, size=1024):
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" '
-            f'viewBox="0 0 1024 1024">\n{DEFS}\n{body}\n</svg>\n')
-
-
-def variant(kind):
+def icon(framing="tile"):
     S = 1024
-    if kind == "macos":
-        # Padded squircle with a soft drop shadow (modern macOS style).
-        m = 100; side = S - 2 * m; rad = 185
-        bg = (f'<g filter="url(#shadow)">'
-              f'<rect x="{m}" y="{m}" width="{side}" height="{side}" rx="{rad}" ry="{rad}" '
-              f'fill="url(#ground)"/></g>')
-        art = bowl_art(S / 2, S / 2 + 6, side * 0.398)
-        return svg(bg + "\n" + art)
-    if kind == "web":
-        rad = 150
-        bg = f'<rect width="{S}" height="{S}" rx="{rad}" ry="{rad}" fill="url(#ground)"/>'
-        art = bowl_art(S / 2, S / 2, S * 0.404)
-        return svg(bg + "\n" + art)
-    if kind == "maskable":
-        # Full-bleed ground; art within the centre 80% safe zone.
-        bg = f'<rect width="{S}" height="{S}" fill="url(#ground)"/>'
-        art = bowl_art(S / 2, S / 2, S * 0.36)
-        return svg(bg + "\n" + art)
-    raise ValueError(kind)
-
+    parts = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">']
+    if framing == "macos":
+        m=100; side=S-2*m; rad=185
+        parts.append(f'<defs><filter id="sh" x="-40%" y="-40%" width="180%" height="180%">'
+                     f'<feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000" flood-opacity="0.28"/>'
+                     f'</filter></defs>')
+        parts.append(f'<g filter="url(#sh)"><rect x="{m}" y="{m}" width="{side}" height="{side}" '
+                     f'rx="{rad}" fill="{CREAM}"/></g>')
+        cx, cy, Rx = S/2, S/2-side*0.03, side*0.33
+    elif framing == "maskable":
+        parts.append(f'<rect width="{S}" height="{S}" fill="{CREAM}"/>')
+        cx, cy, Rx = S/2, S/2-30, S*0.30
+    else:  # tile (web / windows / favicon)
+        parts.append(f'<rect width="{S}" height="{S}" rx="150" fill="{CREAM}"/>')
+        cx, cy, Rx = S/2, S/2-30, S*0.33
+    body, _ = bowl(cx, cy, Rx)
+    parts.append(body)
+    parts.append('</svg>')
+    return "\n".join(parts)
 
 if __name__ == "__main__":
     import sys
     out = sys.argv[1] if len(sys.argv) > 1 else "."
-    for k in ("macos", "web", "maskable"):
-        open(f"{out}/icon_{k}.svg", "w").write(variant(k))
-        print(f"wrote {out}/icon_{k}.svg")
+    for fr in ("tile", "macos", "maskable"):
+        open(f"{out}/flat_{fr}.svg", "w").write(icon(fr))
+        print("wrote", fr)

@@ -1,6 +1,6 @@
 # App icon
 
-Source of truth for the application icon: a top-down segmented turned bowl in the
+Source of truth for the application icon: a flat, bold-outlined 3/4 segmented bowl (checkerboard of maple/oak/walnut on a warm cream tile) in the
 app's warm wood palette (amber rim, brick-bonded maple/walnut courses with a
 padauk accent ring, concave shading) on an espresso ground.
 
