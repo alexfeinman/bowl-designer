@@ -215,6 +215,11 @@ final xrayWallProvider = StateProvider<double?>((ref) => null);
 /// instead of the glued rings. Off by default.
 final turnedBowlProvider = StateProvider<bool>((ref) => false);
 
+/// Whether the Side view is "unrolled" (Mercator): every ring's full ring of
+/// segments laid flat as an equal-width horizontal band, so smaller rings are
+/// stretched to the widest ring's width. Off by default (shows the elevation).
+final sideUnrolledProvider = StateProvider<bool>((ref) => false);
+
 /// Whether the 3D view is *locally* hiding its selection highlight because the
 /// user clicked empty space there. It does not touch the global selection (the
 /// ring list and inspector keep it), and any real [SelectionController.select]

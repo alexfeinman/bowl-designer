@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/units.dart';
 import '../../rendering/cross_section_painter.dart';
 import '../../rendering/elevation_painter.dart';
+import '../../rendering/unrolled_painter.dart';
 import '../../state/project_controller.dart';
 import '../theme.dart';
 import 'bowl_3d_view.dart';
@@ -61,8 +62,11 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
     final project = ref.watch(projectProvider);
     final unit = ref.watch(displayUnitProvider);
     final selId = ref.watch(selectedRingIdProvider);
-    // Grid is a Side-elevation aid only; the X-ray never draws one.
-    final gridAllowed = !xray;
+    // The unrolled (Mercator) segment map is a Side-view mode only.
+    final unrolled = !xray && ref.watch(sideUnrolledProvider);
+    // Grid is a Side-elevation aid only; the X-ray and the unrolled map never
+    // draw one.
+    final gridAllowed = !xray && !unrolled;
     final showGrid = gridAllowed && ref.watch(gridVisibleProvider);
     final wallMm = xray ? ref.watch(xrayWallProvider) : null;
     return LayoutBuilder(
@@ -77,19 +81,27 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
                 highlightRingId: selId,
                 wireframeWallMm: wallMm,
               )
-            : ElevationPainter(
-                project: project,
-                colors: c,
-                unit: unit,
-                highlightRingId: selId,
-              );
+            : unrolled
+                ? UnrolledPainter(
+                    project: project,
+                    colors: c,
+                    highlightRingId: selId,
+                  )
+                : ElevationPainter(
+                    project: project,
+                    colors: c,
+                    unit: unit,
+                    highlightRingId: selId,
+                  );
         final Widget canvas = CustomPaint(painter: painter);
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapUp: (d) {
             final id = xray
                 ? CrossSectionPainter.ringIdAt(project, size, d.localPosition)
-                : ElevationPainter.ringIdAt(project, size, d.localPosition);
+                : unrolled
+                    ? UnrolledPainter.ringIdAt(project, size, d.localPosition)
+                    : ElevationPainter.ringIdAt(project, size, d.localPosition);
             if (id != null) {
               ref.read(selectionControllerProvider.notifier).select(id);
             }
@@ -110,15 +122,32 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
               _ViewLabel(
                   text: xray
                       ? 'X-RAY · FINISHED WALL PROFILE · CLICK TO SELECT'
-                      : 'SIDE ELEVATION · SEGMENTS · CLICK TO SELECT'),
-              if (gridAllowed)
+                      : unrolled
+                          ? 'UNROLLED · COMPLETE SEGMENT MAP · 0–360° · CLICK TO SELECT'
+                          : 'SIDE ELEVATION · SEGMENTS · CLICK TO SELECT'),
+              if (!xray)
                 Positioned(
                   right: 12,
                   bottom: 12,
-                  child: _GridToggle(
-                    on: showGrid,
-                    onTap: () =>
-                        ref.read(gridVisibleProvider.notifier).state = !showGrid,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (gridAllowed) ...[
+                        _GridToggle(
+                          on: showGrid,
+                          onTap: () => ref
+                              .read(gridVisibleProvider.notifier)
+                              .state = !showGrid,
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      _UnrollToggle(
+                        on: unrolled,
+                        onTap: () => ref
+                            .read(sideUnrolledProvider.notifier)
+                            .state = !unrolled,
+                      ),
+                    ],
                   ),
                 ),
               if (xray)
@@ -333,6 +362,36 @@ class _GridToggle extends StatelessWidget {
   final bool on;
   final VoidCallback onTap;
   @override
+  Widget build(BuildContext context) =>
+      _PillToggle(on: on, onTap: onTap, icon: Icons.grid_4x4, label: 'Grid');
+}
+
+/// Toggles the Side view between the elevation and the unrolled (Mercator)
+/// segment map.
+class _UnrollToggle extends StatelessWidget {
+  const _UnrollToggle({required this.on, required this.onTap});
+  final bool on;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => _PillToggle(
+      on: on,
+      onTap: onTap,
+      icon: Icons.calendar_view_month,
+      label: 'Unroll');
+}
+
+/// The small pill toggle used at the bottom-right of the 2D views.
+class _PillToggle extends StatelessWidget {
+  const _PillToggle(
+      {required this.on,
+      required this.onTap,
+      required this.icon,
+      required this.label});
+  final bool on;
+  final VoidCallback onTap;
+  final IconData icon;
+  final String label;
+  @override
   Widget build(BuildContext context) {
     final c = context.colors;
     return Material(
@@ -350,9 +409,9 @@ class _GridToggle extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.grid_4x4, size: 15, color: on ? c.accent : c.muted),
+              Icon(icon, size: 15, color: on ? c.accent : c.muted),
               const SizedBox(width: 6),
-              Text('Grid',
+              Text(label,
                   style: AppFonts.ui(TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
