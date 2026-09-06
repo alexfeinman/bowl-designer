@@ -36,23 +36,67 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
   three.Vector3 _homePos = three.Vector3(1, 1, 1);
   final three.Vector3 _homeTarget = three.Vector3();
 
+  bool _disposed = false;
+  bool _pumpScheduled = false;
+  bool _rendering = false;
+  bool _dirty = false;
+
   @override
   void initState() {
     super.initState();
     threeJs = three.ThreeJS(
-      onSetupComplete: () => setState(() => _ready = true),
+      onSetupComplete: () {
+        setState(() => _ready = true);
+        _requestRender();
+      },
       setup: _setup,
-      settings: three.Settings(clearColor: 0x1a1611, antialias: widget.antialias),
+      // Render on demand (see _pump) instead of every ticker frame, so an idle
+      // 3D view uses no GPU/CPU. This is essential on machines that fall back
+      // to software GL (e.g. some Linux boxes were pegging all cores) and saves
+      // battery everywhere.
+      settings: three.Settings(
+          clearColor: 0x1a1611, antialias: widget.antialias, animate: false),
     );
   }
 
   @override
   void dispose() {
+    _disposed = true;
     _controls?.dispose();
     if (threeJs.mounted) threeJs.dispose();
     three.loading.clear();
     super.dispose();
   }
+
+  /// Mark the scene dirty and ensure a frame is pumped. Cheap to call often.
+  void _requestRender() {
+    _dirty = true;
+    _schedulePump();
+  }
+
+  void _schedulePump() {
+    if (_pumpScheduled || _rendering || _disposed) return;
+    _pumpScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pumpScheduled = false;
+      _pump();
+    });
+  }
+
+  /// Apply any control (camera) changes and render a single frame; keep pumping
+  /// while the controls are still easing (damping) or another change arrived.
+  Future<void> _pump() async {
+    if (!_ready || _disposed || !threeJs.mounted) return;
+    _rendering = true;
+    _dirty = false;
+    final moving = _controls?.update() ?? false;
+    await threeJs.render();
+    _rendering = false;
+    if (_disposed) return;
+    if (moving || _dirty) _schedulePump();
+  }
+
+  void _onControlsChange(dynamic _) => _requestRender();
 
   Future<void> _setup() async {
     threeJs.scene = three.Scene();
@@ -71,7 +115,8 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
         onClick: _pickAt)
       ..enableDamping = true
       ..dampingFactor = 0.08;
-    threeJs.addAnimationEvent((dt) => _controls!.update());
+    // Render only when the camera actually changes (drag / zoom / damping ease).
+    _controls!.addEventListener('change', _onControlsChange);
 
     _builtTurned = ref.read(turnedBowlProvider);
     _builtWall = ref.read(xrayWallProvider);
@@ -129,6 +174,7 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
       _ringMats[i].emissive?.setFromHex32(i == _highlight ? 0x6b4a12 : 0x000000);
       _ringMats[i].needsUpdate = true;
     }
+    _requestRender();
   }
 
   void _frame(BowlProject project) {
@@ -150,6 +196,7 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     threeJs.camera.position.setFrom(_homePos);
     _controls!.target.setFrom(_homeTarget);
     _controls!.update();
+    _requestRender();
   }
 
   /// Ray-pick a ring from an element-local pixel position (from the controls).
