@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -6,9 +7,16 @@ import 'package:three_js/three_js.dart' as three;
 import '../models/material.dart';
 
 /// Decoded RGBA pixels for one species image (renderer-independent).
+///
+/// [data] is a plain Dart [Uint8List] on purpose — NOT a `three.Uint8Array`.
+/// three_js's `Texture.dispose()` frees the native array backing its image
+/// (`calloc.free`), so a native array must never be shared between a texture and
+/// this long-lived cache: disposing one 3D view would free the cached pixels and
+/// the next view would upload freed memory (garbage). [makeTexture] therefore
+/// copies these bytes into a fresh native array per texture.
 class DecodedWood {
   DecodedWood(this.data, this.width, this.height);
-  final three.Uint8Array data;
+  final Uint8List data;
   final int width;
   final int height;
 }
@@ -83,18 +91,16 @@ class WoodTextures {
   static three.Texture? makeTexture(String assetId) {
     final d = _pixels[assetId];
     if (d == null) return null;
-    final tex = three.DataTexture(d.data, d.width, d.height, three.RGBAFormat);
+    // Fresh native array per texture (see DecodedWood): the texture owns it and
+    // may free it on dispose without touching the cache or sibling textures.
+    final tex = three.DataTexture(three.Uint8Array.fromList(d.data), d.width,
+        d.height, three.RGBAFormat);
     tex.wrapS = three.RepeatWrapping;
     tex.wrapT = three.RepeatWrapping;
-    // No mipmaps: flutter_angle does not reliably build a mipmap chain for a
-    // DataTexture, so a mipmap minFilter leaves the texture GPU-incomplete and
-    // minified surfaces (a bowl's floor centre, a razor-thin wall seen edge-on)
-    // sample as RGB static. Linear min/mag on the base level is always complete —
-    // it only shimmers a little at extreme minification, never turns to noise.
     tex.magFilter = three.LinearFilter;
-    tex.minFilter = three.LinearFilter;
-    tex.generateMipmaps = false;
-    tex.anisotropy = 1;
+    tex.minFilter = three.LinearMipmapLinearFilter;
+    tex.generateMipmaps = true;
+    tex.anisotropy = 8;
     tex.colorSpace = three.SRGBColorSpace;
     tex.flipY = false;
     tex.needsUpdate = true;
@@ -111,8 +117,9 @@ class WoodTextures {
       final w = img.width, h = img.height;
       img.dispose();
       if (rgba == null) return null;
-      return DecodedWood(
-          three.Uint8Array.fromList(rgba.buffer.asUint8List()), w, h);
+      // Own copy (Uint8List.fromList) so it's detached from any transient buffer
+      // and lives as long as the cache; makeTexture copies it per texture.
+      return DecodedWood(Uint8List.fromList(rgba.buffer.asUint8List()), w, h);
     } catch (_) {
       return null; // missing/broken asset → silently fall back to flat colour
     }
