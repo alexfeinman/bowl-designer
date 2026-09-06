@@ -368,20 +368,19 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
   }
 
   Future<void> _exportPng() async {
-    final project = ref.read(projectProvider);
-    final safe = project.name.trim().isEmpty
-        ? 'bowl'
-        : project.name.trim().replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_');
-    final suffix = ref.read(turnedBowlProvider) ? 'turned' : '3d';
+    final ctrl = ref.read(projectControllerProvider.notifier);
+    final base = ctrl.suggestedExportBase();
+    final tag = ref.read(turnedBowlProvider) ? 'turned' : '3d';
     try {
       final png = await _capturePng();
       if (png == null) {
         _snack('Could not capture the 3D view.');
         return;
       }
-      final ok = await saveBytes('$safe $suffix.png', png,
+      final saved = await saveBytes('$base $tag.png', png,
           typeLabel: 'PNG image', extensions: ['png']);
-      if (ok) _snack('3D view exported.');
+      ctrl.noteExportFilename(' $tag', saved);
+      if (saved != null) _snack('3D view exported.');
     } catch (e) {
       _snack('PNG export failed: $e');
     }

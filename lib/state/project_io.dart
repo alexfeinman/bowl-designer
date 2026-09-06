@@ -11,36 +11,56 @@ class ProjectIo {
 
   static const String extension = 'sbowl';
 
-  static String _sanitize(String name) {
+  /// Cut-list exports append this to the base name.
+  static const String cutListSuffix = '-cutlist';
+
+  /// Make [name] safe for a filename base (no extension).
+  static String sanitize(String name) {
     final base = name.trim().isEmpty ? 'bowl' : name.trim();
     return base.replaceAll(RegExp(r'[^\w\- ]'), '_');
   }
 
-  /// Serialize [project] to pretty JSON and save it. Returns true if written.
-  static Future<bool> save(BowlProject project) async {
+  /// Recover the base name the user ended up with from a saved [filename],
+  /// stripping the extension and, if present, the [suffix] we appended (e.g.
+  /// "-cutlist" or " 3d"). Used to detect a rename in the save dialog.
+  static String baseFromFilename(String filename, String suffix) {
+    var s = filename;
+    final dot = s.lastIndexOf('.');
+    if (dot > 0) s = s.substring(0, dot);
+    if (suffix.isNotEmpty && s.endsWith(suffix)) {
+      s = s.substring(0, s.length - suffix.length);
+    }
+    return s.trim();
+  }
+
+  /// Serialize [project] to pretty JSON and save it under [baseName]. Returns
+  /// the file name actually written, or null if cancelled.
+  static Future<String?> save(BowlProject project, String baseName) async {
     final json = const JsonEncoder.withIndent('  ').convert(project.toJson());
     return saveBytes(
-      '${_sanitize(project.name)}.$extension',
+      '${sanitize(baseName)}.$extension',
       utf8.encode(json),
       typeLabel: 'Bowl design',
       extensions: const [extension, 'json'],
     );
   }
 
-  /// Export cut-list [csv] text to a file. Returns true if written.
-  static Future<bool> exportCsv(String csv, String projectName) async {
+  /// Export cut-list [csv] under [baseName]. Returns the file name written, or
+  /// null if cancelled.
+  static Future<String?> exportCsv(String csv, String baseName) async {
     return saveBytes(
-      '${_sanitize(projectName)}-cutlist.csv',
+      '${sanitize(baseName)}$cutListSuffix.csv',
       utf8.encode(csv),
       typeLabel: 'CSV',
       extensions: const ['csv'],
     );
   }
 
-  /// Save cut-list PDF [bytes] to a file. Returns true if written.
-  static Future<bool> exportPdf(List<int> bytes, String projectName) async {
+  /// Save cut-list PDF [bytes] under [baseName]. Returns the file name written,
+  /// or null if cancelled.
+  static Future<String?> exportPdf(List<int> bytes, String baseName) async {
     return saveBytes(
-      '${_sanitize(projectName)}-cutlist.pdf',
+      '${sanitize(baseName)}$cutListSuffix.pdf',
       bytes,
       typeLabel: 'PDF',
       extensions: const ['pdf'],

@@ -8,6 +8,7 @@ import '../models/bowl_project.dart';
 import '../models/ring.dart';
 import '../models/units.dart';
 import 'local_store.dart';
+import 'project_io.dart';
 
 /// Initial project the controller starts from. Overridden in `main()` with the
 /// autosaved design when one is restored; otherwise the sample.
@@ -138,12 +139,39 @@ class ProjectController extends Notifier<ProjectHistory> {
   void autoFitWalls(double targetMm, WallFitMode mode) =>
       _commit(RingGeometry.autoAdjustWalls(project, targetMm, mode));
 
-  void rename(String name) => _commit(project.copyWith(name: name));
+  void rename(String name) {
+    // Editing the design name is an explicit act, so exports follow it again:
+    // drop any filename override picked up from an earlier save dialog.
+    ref.read(exportBaseNameProvider.notifier).state = null;
+    _commit(project.copyWith(name: name));
+  }
 
   /// Replace the whole project (e.g. on open / import), fresh history.
   void loadProject(BowlProject next) {
+    // A different design starts from its own name, not a stale filename.
+    ref.read(exportBaseNameProvider.notifier).state = null;
     state = ProjectHistory(stack: [next], index: 0);
     _persist();
+  }
+
+  // ---- export file naming --------------------------------------------------
+
+  /// The base filename to suggest for the next save/export: the user's last
+  /// dialog rename if there was one, otherwise the (sanitized) design name.
+  String suggestedExportBase() =>
+      ref.read(exportBaseNameProvider) ?? ProjectIo.sanitize(project.name);
+
+  /// Record the file name a save/export actually used. If the user renamed it
+  /// in the dialog, adopt that base for subsequent saves/exports — without
+  /// touching the design name shown in the banner. [suffix] is what we append
+  /// for this kind of export ('' for a design, '-cutlist', ' 3d', ' turned').
+  void noteExportFilename(String suffix, String? savedFilename) {
+    if (savedFilename == null) return; // cancelled — nothing to learn
+    final base = ProjectIo.baseFromFilename(savedFilename, suffix);
+    if (base.isEmpty) return;
+    if (base != suggestedExportBase()) {
+      ref.read(exportBaseNameProvider.notifier).state = base;
+    }
   }
 
   // ---- non-history settings ------------------------------------------------
@@ -193,6 +221,11 @@ final projectControllerProvider =
 /// Convenience: the current project document.
 final projectProvider =
     Provider<BowlProject>((ref) => ref.watch(projectControllerProvider).current);
+
+/// A filename base the user chose in a save dialog that differs from the design
+/// name. Null → derive the suggested filename from the design name. Session-only
+/// (never serialized); reset when a new design is loaded or the name is edited.
+final exportBaseNameProvider = StateProvider<String?>((ref) => null);
 
 /// Active display unit (lives on the project).
 final displayUnitProvider =

@@ -4,8 +4,9 @@ import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 
 /// Web save: trigger a browser download of [bytes] as [filename].
-/// Always returns true (the browser handles the destination).
-Future<bool> saveBytes(
+/// Returns [filename] (the browser handles the destination and never reports a
+/// rename back, so the suggested name is the effective one).
+Future<String?> saveBytes(
   String filename,
   List<int> bytes, {
   required String typeLabel,
@@ -25,5 +26,5 @@ Future<bool> saveBytes(
   anchor.click();
   anchor.remove();
   web.URL.revokeObjectURL(url);
-  return true;
+  return filename;
 }

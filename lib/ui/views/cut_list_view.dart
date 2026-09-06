@@ -154,10 +154,11 @@ class CutListView extends ConsumerWidget {
   }
 
   Future<void> _export(BuildContext context, WidgetRef ref) async {
-    final project = ref.read(projectProvider);
-    final csv = buildCutListCsv(project);
-    final ok = await ProjectIo.exportCsv(csv, project.name);
-    if (context.mounted && ok) {
+    final ctrl = ref.read(projectControllerProvider.notifier);
+    final csv = buildCutListCsv(ref.read(projectProvider));
+    final saved = await ProjectIo.exportCsv(csv, ctrl.suggestedExportBase());
+    ctrl.noteExportFilename(ProjectIo.cutListSuffix, saved);
+    if (context.mounted && saved != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cut list exported.')),
       );
@@ -174,11 +175,12 @@ class CutListView extends ConsumerWidget {
   }
 
   Future<void> _exportPdf(BuildContext context, WidgetRef ref) async {
-    final project = ref.read(projectProvider);
+    final ctrl = ref.read(projectControllerProvider.notifier);
     try {
-      final bytes = await buildCutListPdf(project);
-      final ok = await ProjectIo.exportPdf(bytes, project.name);
-      if (context.mounted && ok) {
+      final bytes = await buildCutListPdf(ref.read(projectProvider));
+      final saved = await ProjectIo.exportPdf(bytes, ctrl.suggestedExportBase());
+      ctrl.noteExportFilename(ProjectIo.cutListSuffix, saved);
+      if (context.mounted && saved != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Cut list PDF saved.')),
         );

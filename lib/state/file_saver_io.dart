@@ -4,8 +4,9 @@ import 'dart:typed_data';
 import 'package:file_selector/file_selector.dart';
 
 /// Desktop/native save: prompt for a location and write [bytes].
-/// Returns true if the file was written, false if the user cancelled.
-Future<bool> saveBytes(
+/// Returns the file name the user actually chose (its last path segment, so a
+/// rename in the dialog is visible to the caller), or null if they cancelled.
+Future<String?> saveBytes(
   String filename,
   List<int> bytes, {
   required String typeLabel,
@@ -15,7 +16,7 @@ Future<bool> saveBytes(
     suggestedName: filename,
     acceptedTypeGroups: [XTypeGroup(label: typeLabel, extensions: extensions)],
   );
-  if (location == null) return false;
+  if (location == null) return null;
   await File(location.path).writeAsBytes(Uint8List.fromList(bytes));
-  return true;
+  return location.path.split(RegExp(r'[/\\]')).last;
 }

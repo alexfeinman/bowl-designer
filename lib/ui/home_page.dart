@@ -105,7 +105,6 @@ class _TopBar extends ConsumerWidget {
     final c = context.colors;
     final history = ref.watch(projectControllerProvider);
     final ctrl = ref.read(projectControllerProvider.notifier);
-    final project = ref.watch(projectProvider);
     final unit = ref.watch(displayUnitProvider);
     final mode = ref.watch(themeModeProvider);
 
@@ -124,11 +123,7 @@ class _TopBar extends ConsumerWidget {
               style: AppFonts.display(TextStyle(
                   fontSize: 17, fontWeight: FontWeight.w600, color: c.ink))),
           const SizedBox(width: 9),
-          Flexible(
-            child: Text('· ${project.name}',
-                overflow: TextOverflow.ellipsis,
-                style: AppFonts.ui(TextStyle(fontSize: 12, color: c.muted))),
-          ),
+          const Flexible(child: _EditableProjectName()),
           const Spacer(),
           _IconBtn(
             icon: Icons.undo,
@@ -189,10 +184,14 @@ class _TopBar extends ConsumerWidget {
 
   Future<void> _save(BuildContext context, WidgetRef ref) async {
     try {
-      final ok = await ProjectIo.save(ref.read(projectProvider));
+      final ctrl = ref.read(projectControllerProvider.notifier);
+      final saved =
+          await ProjectIo.save(ref.read(projectProvider), ctrl.suggestedExportBase());
+      ctrl.noteExportFilename('', saved);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(ok ? 'Design saved.' : 'Save cancelled.')),
+          SnackBar(
+              content: Text(saved != null ? 'Design saved.' : 'Save cancelled.')),
         );
       }
     } catch (e) {
@@ -222,6 +221,117 @@ class _TopBar extends ConsumerWidget {
             .showSnackBar(SnackBar(content: Text('Open failed: $e')));
       }
     }
+  }
+}
+
+/// The design name shown in the top bar. Click to rename in place; the name
+/// seeds the suggested filename when saving/exporting.
+class _EditableProjectName extends ConsumerStatefulWidget {
+  const _EditableProjectName();
+  @override
+  ConsumerState<_EditableProjectName> createState() =>
+      _EditableProjectNameState();
+}
+
+class _EditableProjectNameState extends ConsumerState<_EditableProjectName> {
+  final _ctrl = TextEditingController();
+  final _focus = FocusNode();
+  bool _editing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    // Suspend global resize shortcuts while typing, and commit on focus loss.
+    ref.read(editingTextProvider.notifier).state = _focus.hasFocus;
+    if (!_focus.hasFocus && _editing) _commit();
+  }
+
+  @override
+  void dispose() {
+    if (_focus.hasFocus) {
+      ref.read(editingTextProvider.notifier).state = false;
+    }
+    _focus.removeListener(_onFocusChange);
+    _ctrl.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _start(String current) {
+    _ctrl.text = current;
+    _ctrl.selection =
+        TextSelection(baseOffset: 0, extentOffset: current.length);
+    setState(() => _editing = true);
+    _focus.requestFocus();
+  }
+
+  void _commit() {
+    final name = _ctrl.text.trim();
+    final current = ref.read(projectProvider).name;
+    if (name.isNotEmpty && name != current) {
+      ref.read(projectControllerProvider.notifier).rename(name);
+    }
+    if (mounted) setState(() => _editing = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final name = ref.watch(projectProvider).name;
+    if (_editing) {
+      return SizedBox(
+        width: 240,
+        child: TextField(
+          controller: _ctrl,
+          focusNode: _focus,
+          autofocus: true,
+          style: AppFonts.ui(TextStyle(fontSize: 12, color: c.ink)),
+          decoration: InputDecoration(
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: c.borderStrong),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: c.accent),
+            ),
+          ),
+          onSubmitted: (_) => _commit(),
+          onTapOutside: (_) => _commit(),
+        ),
+      );
+    }
+    return Tooltip(
+      message: 'Rename design',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => _start(name),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text('· $name',
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        AppFonts.ui(TextStyle(fontSize: 12, color: c.muted))),
+              ),
+              const SizedBox(width: 5),
+              Icon(Icons.edit_outlined, size: 12, color: c.faint),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
