@@ -43,7 +43,7 @@ class CrossSectionPainter extends CustomPainter {
     for (final ring in project.rings) {
       final h = ring.thickness * scale;
       final top = y - h;
-      final ro = ring.outerDiameter / 2 * scale;
+      final ro = ring.maxReachOuterDiameter / 2 * scale;
       if (p.dy >= top && p.dy <= y && (p.dx - cx).abs() <= ro) {
         return ring.id;
       }
@@ -76,16 +76,21 @@ class CrossSectionPainter extends CustomPainter {
       ..strokeWidth = 0.8
       ..color = colors.ink.withValues(alpha: xray ? 0.25 : 0.35);
 
-    // Captured bands (top, bottom, outerR, innerR) for the x-ray wireframe.
+    // Captured bands for the x-ray wireframe, one per course, base first:
+    // [topY, bottomY, outerR@top, outerR@bottom, innerR@top, innerR@bottom].
+    // A tilted course (compound / tapered stave) flares, so top and bottom
+    // radii differ; a flat ring has them equal.
     final bands = <List<double>>[];
 
     var y = baseY;
     for (final ring in project.rings) {
       final h = ring.thickness * scale;
       final top = y - h;
-      final ro = ring.outerDiameter / 2 * scale;
-      final ri = ring.effectiveInnerDiameter / 2 * scale;
-      bands.add([top, y, ro, ri]);
+      final roB = ring.outerDiameter / 2 * scale;
+      final roT = ring.topOuterDiameter / 2 * scale;
+      final riB = ring.effectiveInnerDiameter / 2 * scale;
+      final riT = ring.topInnerDiameter / 2 * scale;
+      bands.add([top, y, roT, roB, riT, riB]);
       final baseColor = _ringColor(ring);
       final fill = Paint()
         ..style = PaintingStyle.fill
@@ -93,31 +98,44 @@ class CrossSectionPainter extends CustomPainter {
 
       final highlighted = ring.id == highlightRingId;
 
-      if (ri <= 0.5) {
-        final r = Rect.fromLTRB(cx - ro, top, cx + ro, y);
-        canvas.drawRect(r, fill);
-        canvas.drawRect(r, wallStroke);
-        if (xray) _joints(canvas, cx - ro, cx + ro, top, y, ring, colors);
+      // A trapezoid for one wall (or the full block) that leans with the flare.
+      Path block(double outerB, double outerT, double innerB, double innerT) =>
+          Path()
+            ..moveTo(cx + innerB, y)
+            ..lineTo(cx + outerB, y)
+            ..lineTo(cx + outerT, top)
+            ..lineTo(cx + innerT, top)
+            ..close();
+
+      if (riB <= 0.5 && riT <= 0.5) {
+        final p = block(-roB, -roT, roB, roT);
+        canvas.drawPath(p, fill);
+        canvas.drawPath(p, wallStroke);
+        if (xray) _joints(canvas, cx - roB, cx + roB, top, y, ring, colors);
       } else {
-        for (final side in const [-1, 1]) {
-          final a = side < 0 ? cx - ro : cx + ri;
-          final b = side < 0 ? cx - ri : cx + ro;
-          final r = Rect.fromLTRB(a, top, b, y);
-          canvas.drawRect(r, fill);
-          canvas.drawRect(r, wallStroke);
-          if (xray) _joints(canvas, a, b, top, y, ring, colors);
+        // Left wall: outer at -ro, inner at -ri. Right wall: mirror.
+        final left = block(-roB, -roT, -riB, -riT);
+        final right = block(riB, riT, roB, roT);
+        for (final p in [left, right]) {
+          canvas.drawPath(p, fill);
+          canvas.drawPath(p, wallStroke);
+        }
+        if (xray) {
+          _joints(canvas, cx - roB, cx - riB, top, y, ring, colors);
+          _joints(canvas, cx + riB, cx + roB, top, y, ring, colors);
         }
       }
 
-      // Course glue line.
-      canvas.drawLine(Offset(cx - ro, top), Offset(cx + ro, top), courseLine);
+      // Course glue line (along the flared top edge).
+      canvas.drawLine(Offset(cx - roT, top), Offset(cx + roT, top), courseLine);
 
       if (highlighted) {
         final hp = Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.8
           ..color = colors.accent;
-        canvas.drawRect(Rect.fromLTRB(cx - ro - 2, top - 1, cx + ro + 2, y + 1), hp);
+        final hr = math.max(roB, roT);
+        canvas.drawRect(Rect.fromLTRB(cx - hr - 2, top - 1, cx + hr + 2, y + 1), hp);
       }
       y = top;
     }
@@ -185,22 +203,32 @@ class CrossSectionPainter extends CustomPainter {
     final topRim = bands.last[0];
     final baseBottom = bands.first[1];
 
-    double blockR(double y, int idx) {
+    // Radius of the stock block at height [yy]. [outer] picks the outer wall
+    // (indices 2=top, 3=bottom) or the bore (4=top, 5=bottom), interpolating
+    // within a flared course by height.
+    double blockR(double yy, bool outer) {
+      final ti = outer ? 2 : 4, bi = outer ? 3 : 5;
       for (final b in bands) {
-        if (y >= b[0] - 0.5 && y <= b[1] + 0.5) return b[idx];
+        if (yy >= b[0] - 0.5 && yy <= b[1] + 0.5) {
+          final span = b[1] - b[0];
+          final t = span <= 0 ? 0.0 : ((b[1] - yy) / span).clamp(0.0, 1.0);
+          return b[bi] + (b[ti] - b[bi]) * t; // 0 at bottom, 1 at top
+        }
       }
-      return y < topRim ? bands.last[idx] : bands.first[idx];
+      if (yy < topRim) return outer ? bands.last[ti] : bands.last[ti];
+      return outer ? bands.first[bi] : bands.first[bi];
     }
 
     // Control points at each ring's binding corner, ordered top -> bottom:
-    // the outer at the ring top (b[0]), the bore at the ring bottom (b[1]).
+    // the outer at the ring top (widest for an opening form), the bore at the
+    // ring bottom (narrowest).
     final oy = <double>[], or = <double>[]; // outer knot ys / radii
     final iy = <double>[], ir = <double>[]; // bore knot ys / radii
     for (final b in bands.reversed) {
       oy.add(b[0]);
-      or.add(b[2]);
+      or.add(b[2]); // outer radius at the course top
       iy.add(b[1]);
-      ir.add(b[3]);
+      ir.add(b[5]); // bore radius at the course bottom
     }
 
     const n = 240;
@@ -210,8 +238,8 @@ class CrossSectionPainter extends CustomPainter {
     for (var i = 0; i < ys.length; i++) {
       // Ride inside the blocks; keep the bore within the wall so it never
       // inverts and never opens a hole where the block is solid.
-      outer[i] = math.min(outer[i], blockR(ys[i], 2));
-      inner[i] = math.max(inner[i], blockR(ys[i], 3));
+      outer[i] = math.min(outer[i], blockR(ys[i], true));
+      inner[i] = math.max(inner[i], blockR(ys[i], false));
       inner[i] = math.min(math.max(0.0, inner[i]), outer[i]);
     }
 

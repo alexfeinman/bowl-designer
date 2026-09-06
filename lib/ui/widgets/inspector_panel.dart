@@ -132,7 +132,7 @@ class _TypeSelector extends ConsumerWidget {
               ),
           ],
         ),
-        if (ring.type == RingType.compound) ...[
+        if (ring.type == RingType.compound || ring.type == RingType.stave) ...[
           const SizedBox(height: 10),
           _CompoundAngle(ring: ring),
         ],
@@ -195,10 +195,11 @@ class _CompoundAngle extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
     final ctrl = ref.read(projectControllerProvider.notifier);
+    final label = ring.type == RingType.stave ? 'Stave taper' : 'Wall angle';
     return Row(
       children: [
         Expanded(
-          child: Text('Wall angle',
+          child: Text(label,
               style: AppFonts.ui(TextStyle(fontSize: 11, color: c.muted))),
         ),
         SizedBox(

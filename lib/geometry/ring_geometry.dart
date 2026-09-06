@@ -19,6 +19,8 @@ class RingCutSpec {
     required this.ring,
     required this.physicalSegments,
     required this.miterAngleDeg,
+    required this.bevelAngleDeg,
+    required this.endBevelDeg,
     required this.outerEdgeMm,
     required this.innerEdgeMm,
     required this.wallWidthMm,
@@ -26,22 +28,44 @@ class RingCutSpec {
     required this.boardLengthMm,
     required this.boardFeet,
     required this.solid,
+    required this.stave,
   });
 
   final Ring ring;
   final int physicalSegments;
 
-  /// Miter angle set on the saw for each end of a segment (0 when solid).
+  /// Miter angle set on the saw fence for each end of a flat wedge segment
+  /// (180/n). Zero when solid, or for staves (whose joints are rip bevels).
   final double miterAngleDeg;
+
+  /// Blade-tilt bevel. For a compound ring it is the wall tilt applied to the
+  /// wedge faces; for a stave it is the rip bevel along each long edge
+  /// (180/n straight, a compound value when tapered). Zero for flat rings.
+  final double bevelAngleDeg;
+
+  /// Back-bevel cut on the ends of a tapered stave so it seats flat; 0 for a
+  /// straight tube and for non-stave rings.
+  final double endBevelDeg;
+
+  /// For flat wedges: the flat cut length at the outer/inner radius. For a
+  /// stave: the outer/inner WIDTH of the board.
   final double outerEdgeMm;
   final double innerEdgeMm;
   final double wallWidthMm;
+
+  /// For flat wedges: the course height. For a stave: the length of the board
+  /// (which is the course height).
   final double thicknessMm;
 
-  /// Total strip length needed for this ring including the kerf allowance.
+  /// Total strip length needed for this ring including the kerf allowance:
+  /// n·(outer edge + kerf) for wedges, n·(stave length + kerf) for staves.
   final double boardLengthMm;
   final double boardFeet;
   final bool solid;
+
+  /// True when this course is built from vertical staves (barrel style) rather
+  /// than flat-laid wedges, so views/exports can relabel its columns.
+  final bool stave;
 }
 
 /// Pure geometry: the single source of truth used by every view and the cut
@@ -66,6 +90,15 @@ class RingGeometry {
   static double miterForRing(Ring ring) =>
       ring.isSolid ? 0.0 : 180.0 / ring.segmentCount;
 
+  /// Rip-bevel per long edge (degrees) for a staved course of [n] staves whose
+  /// wall tilts [tiltRad] from vertical. Straight (tilt 0): 180/n. As the wall
+  /// approaches horizontal the bevel tends to 0 (a flat disk needs no rip
+  /// bevel). bevel = atan(cos(tilt)·tan(π/n)).
+  static double staveBevelDeg(int n, double tiltRad) {
+    if (n <= 1) return 0.0;
+    return math.atan(math.cos(tiltRad) * math.tan(math.pi / n)) * 180.0 / math.pi;
+  }
+
   /// Flat edge length of a segment at radius [radiusMm] given a half-span,
   /// with no gap: 2·r·tan(halfSpan) — the circumscribed polygon side.
   static double edgeLength(double radiusMm, double halfSpan) {
@@ -87,17 +120,49 @@ class RingGeometry {
   /// Full shop specification for a single [ring].
   static RingCutSpec cutSpec(Ring ring, {double kerfAllowanceMm = 6.0}) {
     final solid = ring.isSolid;
-    final ro = ring.outerDiameter / 2.0;
-    final ri = ring.effectiveInnerDiameter / 2.0;
     final physical = ring.physicalSegmentCount;
     final halfSpan = halfSpanRad(ring);
-
-    final outerEdge =
-        solid ? ring.outerDiameter : edgeLengthWithGap(ro, halfSpan, ring.gapMm);
-    final innerEdge =
-        solid ? 0.0 : edgeLengthWithGap(ri, halfSpan, ring.gapMm);
     final wall = ring.width;
+    final tilt = ring.wallTiltRad; // 0 unless compound / tapered stave
+    // Edge lengths taken at the course mid-height radius (the flare grows the
+    // radius over the height; the middle is representative for the flat cut).
+    final rMeanO = ring.outerDiameter / 2.0 + ring.wallRiseMm / 2.0;
+    final rMeanI = ring.effectiveInnerDiameter <= 0
+        ? 0.0
+        : ring.effectiveInnerDiameter / 2.0 + ring.wallRiseMm / 2.0;
 
+    if (ring.type == RingType.stave && !solid) {
+      // Vertical boards. Outer/inner "edge" is the stave WIDTH; the piece
+      // length is the course height.
+      final staveW = edgeLengthWithGap(rMeanO, halfSpan, ring.gapMm);
+      final staveWi = rMeanI <= 0 ? 0.0 : edgeLengthWithGap(rMeanI, halfSpan, ring.gapMm);
+      final length = ring.thickness;
+      final boardLength = physical * (length + kerfAllowanceMm);
+      final segVolIn3 = (staveW / _mmPerInch) *
+          (wall / _mmPerInch) *
+          (length / _mmPerInch);
+      return RingCutSpec(
+        ring: ring,
+        physicalSegments: physical,
+        miterAngleDeg: 0.0,
+        bevelAngleDeg: staveBevelDeg(ring.segmentCount, tilt),
+        endBevelDeg: tilt * 180.0 / math.pi, // 0 for a straight tube
+        outerEdgeMm: staveW,
+        innerEdgeMm: staveWi,
+        wallWidthMm: wall,
+        thicknessMm: length,
+        boardLengthMm: boardLength,
+        boardFeet: physical * segVolIn3 / 144.0,
+        solid: false,
+        stave: true,
+      );
+    }
+
+    // Flat-laid wedges: disk, normal, compound.
+    final outerEdge = solid
+        ? ring.outerDiameter
+        : edgeLengthWithGap(rMeanO, halfSpan, ring.gapMm);
+    final innerEdge = solid ? 0.0 : edgeLengthWithGap(rMeanI, halfSpan, ring.gapMm);
     final boardLength = physical * (outerEdge + kerfAllowanceMm);
 
     // Bounding-board volume per segment, summed, expressed in board-feet
@@ -111,6 +176,9 @@ class RingGeometry {
       ring: ring,
       physicalSegments: physical,
       miterAngleDeg: miterForRing(ring),
+      // A compound ring adds a blade tilt equal to the wall angle.
+      bevelAngleDeg: ring.type == RingType.compound ? ring.wallAngle : 0.0,
+      endBevelDeg: 0.0,
       outerEdgeMm: outerEdge,
       innerEdgeMm: innerEdge,
       wallWidthMm: wall,
@@ -118,6 +186,7 @@ class RingGeometry {
       boardLengthMm: boardLength,
       boardFeet: boardFeet,
       solid: solid,
+      stave: false,
     );
   }
 

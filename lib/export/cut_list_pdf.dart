@@ -33,13 +33,22 @@ Future<Uint8List> buildCutListPdf(BowlProject project) async {
     'Type',
     'Seg',
     'Miter',
-    'Outer edge',
-    'Inner edge',
+    'Bevel',
+    'Outer/w',
+    'Inner/w',
     'Wall',
-    'Height',
+    'Len/ht',
     'Board len',
     'Bd-ft',
   ];
+
+  String bevel(RingCutSpec spec) {
+    if (spec.bevelAngleDeg <= 0.0001) return '—';
+    final main = '${spec.bevelAngleDeg.toStringAsFixed(2)}°';
+    return spec.endBevelDeg > 0.0001
+        ? '$main/${spec.endBevelDeg.toStringAsFixed(1)}°'
+        : main;
+  }
 
   final rows = [
     for (final s in specs)
@@ -47,7 +56,8 @@ Future<Uint8List> buildCutListPdf(BowlProject project) async {
         s.ring.name,
         s.solid ? 'solid' : s.ring.type.name,
         '${s.physicalSegments}',
-        s.solid ? '—' : '${s.miterAngleDeg.toStringAsFixed(2)}°',
+        s.solid || s.stave ? '—' : '${s.miterAngleDeg.toStringAsFixed(2)}°',
+        bevel(s),
         v(s.outerEdgeMm),
         s.innerEdgeMm > 0 ? v(s.innerEdgeMm) : '—',
         v(s.wallWidthMm),
@@ -61,6 +71,7 @@ Future<Uint8List> buildCutListPdf(BowlProject project) async {
     'TOTAL',
     '',
     '${project.totalSegments}',
+    '',
     '',
     '',
     '',
@@ -137,8 +148,10 @@ Future<Uint8List> buildCutListPdf(BowlProject project) async {
         pw.SizedBox(height: 10),
         pw.Text(
           'Board length includes a ${v(project.kerfAllowanceMm)} $u handling/kerf allowance '
-          'per segment. Miter angle is 180/segments; a gap does not change it. '
-          'Edge lengths are the flat cut length at the outer/inner radius.',
+          'per piece. Miter is 180/segments (fence). Compound rings add a blade-tilt '
+          'bevel = wall angle. Staves are vertical boards: bevel is the rip angle per '
+          'long edge, outer/inner give the stave width, and Len/ht is the board length; '
+          'a tapered stave also back-bevels its ends.',
           style: pw.TextStyle(font: mono, fontSize: 8, color: faint),
         ),
       ],

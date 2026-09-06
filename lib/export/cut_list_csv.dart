@@ -16,10 +16,11 @@ String buildCutListCsv(BowlProject project) {
       'Type',
       'Segments',
       'Miter (°)',
-      'Outer edge ($u)',
-      'Inner edge ($u)',
+      'Bevel (°)',
+      'Outer/width ($u)',
+      'Inner/width ($u)',
       'Wall ($u)',
-      'Height ($u)',
+      'Length/height ($u)',
       'Board length ($u)',
       'Board-feet',
     ],
@@ -30,7 +31,13 @@ String buildCutListCsv(BowlProject project) {
       s.ring.name,
       s.solid ? 'solid' : s.ring.type.name,
       s.physicalSegments,
-      s.solid ? '' : s.miterAngleDeg.toStringAsFixed(2),
+      s.solid || s.stave ? '' : s.miterAngleDeg.toStringAsFixed(2),
+      s.bevelAngleDeg > 0.0001
+          ? s.bevelAngleDeg.toStringAsFixed(2) +
+              (s.endBevelDeg > 0.0001
+                  ? ' / ${s.endBevelDeg.toStringAsFixed(1)} ends'
+                  : '')
+          : '',
       v(s.outerEdgeMm),
       s.innerEdgeMm > 0 ? v(s.innerEdgeMm) : '',
       v(s.wallWidthMm),
@@ -46,6 +53,7 @@ String buildCutListCsv(BowlProject project) {
     'TOTAL',
     '',
     totalSeg,
+    '',
     '',
     '',
     '',

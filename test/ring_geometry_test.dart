@@ -112,6 +112,79 @@ void main() {
     });
   });
 
+  group('compound ring', () {
+    Ring compound(double angle) => Ring(
+          id: 'r',
+          name: 'C',
+          type: RingType.compound,
+          outerDiameter: 200,
+          innerDiameter: 160,
+          thickness: 20,
+          segmentCount: 12,
+          wallAngle: angle,
+        );
+
+    test('flat (0°) matches a normal ring; adds no bevel', () {
+      final s = RingGeometry.cutSpec(compound(0));
+      expect(s.miterAngleDeg, closeTo(15.0, 1e-9));
+      expect(s.bevelAngleDeg, 0.0);
+      expect(s.stave, isFalse);
+      expect(s.outerEdgeMm,
+          closeTo(RingGeometry.edgeLength(100, math.pi / 12), 1e-9));
+    });
+
+    test('wall angle tilts the wall and becomes the blade bevel', () {
+      final r = compound(15);
+      // Base OD is stored; the wall flares outward by thickness·tan(angle).
+      final rise = 20 * math.tan(15 * math.pi / 180);
+      expect(r.wallRiseMm, closeTo(rise, 1e-9));
+      expect(r.topOuterDiameter, closeTo(200 + 2 * rise, 1e-9));
+      final s = RingGeometry.cutSpec(r);
+      expect(s.miterAngleDeg, closeTo(15.0, 1e-9)); // fence miter unchanged
+      expect(s.bevelAngleDeg, closeTo(15.0, 1e-9)); // blade tilt = wall angle
+      // Edge is taken at the mid-height radius (base radius + rise/2).
+      expect(s.outerEdgeMm,
+          closeTo(RingGeometry.edgeLength(100 + rise / 2, math.pi / 12), 1e-9));
+    });
+  });
+
+  group('stave ring', () {
+    Ring stave(double angle) => Ring(
+          id: 'r',
+          name: 'Rim',
+          type: RingType.stave,
+          outerDiameter: 200,
+          innerDiameter: 170,
+          thickness: 60, // tall board
+          segmentCount: 12,
+          wallAngle: angle,
+        );
+
+    test('straight tube: rip bevel = 180/n, no miter, length = height', () {
+      final s = RingGeometry.cutSpec(stave(0));
+      expect(s.stave, isTrue);
+      expect(s.miterAngleDeg, 0.0);
+      expect(s.bevelAngleDeg, closeTo(15.0, 1e-9)); // 180/12
+      expect(s.endBevelDeg, 0.0);
+      expect(s.thicknessMm, closeTo(60, 1e-9)); // stave length = height
+      expect(s.outerEdgeMm,
+          closeTo(RingGeometry.edgeLength(100, math.pi / 12), 1e-9)); // width
+      expect(s.boardLengthMm, closeTo(12 * (60 + 6), 1e-9)); // n·(len+kerf)
+    });
+
+    test('tapered: flares outward, compound edge bevel, back-beveled ends', () {
+      final r = stave(15);
+      expect(r.wallRiseMm, greaterThan(0));
+      expect(r.topOuterDiameter, greaterThan(r.outerDiameter));
+      final s = RingGeometry.cutSpec(r);
+      // atan(cos15·tan15) < 15: the taper eases the rip bevel below 180/n.
+      expect(s.bevelAngleDeg, lessThan(15.0));
+      expect(s.bevelAngleDeg,
+          closeTo(RingGeometry.staveBevelDeg(12, 15 * math.pi / 180), 1e-9));
+      expect(s.endBevelDeg, closeTo(15.0, 1e-9));
+    });
+  });
+
   group('auto-fit walls', () {
     final project = BowlProject.sample();
 

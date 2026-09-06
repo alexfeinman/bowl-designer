@@ -37,8 +37,9 @@ class BowlProject {
   final int formatVersion;
 
   double get totalHeightMm => rings.fold(0.0, (a, r) => a + r.thickness);
-  double get maxOuterDiameterMm =>
-      rings.isEmpty ? 0.0 : rings.map((r) => r.outerDiameter).reduce((a, b) => a > b ? a : b);
+  double get maxOuterDiameterMm => rings.isEmpty
+      ? 0.0
+      : rings.map((r) => r.maxReachOuterDiameter).reduce((a, b) => a > b ? a : b);
   int get totalSegments => rings.fold(0, (a, r) => a + r.physicalSegmentCount);
 
   BowlProject copyWith({

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../models/bowl_project.dart';
+import '../models/ring.dart';
 import '../models/units.dart';
 import '../ui/theme.dart';
 
@@ -45,7 +46,7 @@ class ElevationPainter extends CustomPainter {
     var y = l.baseY;
     for (final ring in project.rings) {
       final top = y - ring.thickness * l.scale;
-      final ro = ring.outerDiameter / 2 * l.scale;
+      final ro = ring.maxReachOuterDiameter / 2 * l.scale;
       if (p.dy >= top && p.dy <= y && (p.dx - l.cx).abs() <= ro) return ring.id;
       y = top;
     }
@@ -61,17 +62,22 @@ class ElevationPainter extends CustomPainter {
     var y = l.baseY;
     for (var ringIndex = 0; ringIndex < project.rings.length; ringIndex++) {
       final ring = project.rings[ringIndex];
+      final isStave = ring.type == RingType.stave;
       final h = ring.thickness * scale;
       final top = y - h;
-      final ro = ring.outerDiameter / 2 * scale;
+      // Base (bottom) and flared (top) outer radii — equal for a flat ring.
+      final roB = ring.outerDiameter / 2 * scale;
+      final roT = ring.topOuterDiameter / 2 * scale;
       final n = ring.segmentCount;
       final slot = 2 * math.pi / n;
       final half = ring.gapMm / 2 * scale; // flat gap half-width in px
-      final rot = ringIndex * (math.pi / n); // #4 half-segment stagger
-      final so = math.sqrt(math.max(0.0, ro * ro - half * half));
+      // Flat wedges brick-bond (half-segment stagger); staves stand in line.
+      final rot = isStave ? 0.0 : ringIndex * (math.pi / n);
+      double chord(double r) => math.sqrt(math.max(0.0, r * r - half * half));
+      final soB = chord(roB), soT = chord(roT);
 
       if (ring.isSolid) {
-        canvas.drawRect(Rect.fromLTRB(cx - ro, top, cx + ro, y),
+        canvas.drawRect(Rect.fromLTRB(cx - roB, top, cx + roB, y),
             Paint()..color = ring.materialAt(0).color);
       } else {
         final jointPaint = Paint()
@@ -82,38 +88,60 @@ class ElevationPainter extends CustomPainter {
           final tb = (i + 1) * slot + rot;
           final mid = (ta + tb) / 2;
           if (math.sin(mid) <= 0.02) continue; // back-facing (behind the bowl)
-          // Outer-face corners (flat, parallel-offset glue faces), projected.
-          final xS = cx + so * math.cos(ta) - half * math.sin(ta);
-          final xE = cx + so * math.cos(tb) + half * math.sin(tb);
-          final left = math.min(xS, xE);
-          final right = math.max(xS, xE);
+          // Outer-face corners at the base and the flared top, projected.
+          final xSb = cx + soB * math.cos(ta) - half * math.sin(ta);
+          final xEb = cx + soB * math.cos(tb) + half * math.sin(tb);
+          final xSt = cx + soT * math.cos(ta) - half * math.sin(ta);
+          final xEt = cx + soT * math.cos(tb) + half * math.sin(tb);
           final shade = 0.68 + 0.32 * math.sin(mid);
           final base = ring.materialAt(i).color;
-          canvas.drawRect(
-            Rect.fromLTRB(left, top, right, y),
+          final facet = Path()
+            ..moveTo(xSb, y)
+            ..lineTo(xEb, y)
+            ..lineTo(xEt, top)
+            ..lineTo(xSt, top)
+            ..close();
+          canvas.drawPath(
+            facet,
             Paint()
               ..color = Color.from(
                   alpha: 1, red: base.r * shade, green: base.g * shade, blue: base.b * shade),
           );
-          canvas.drawLine(Offset(left, top), Offset(left, y), jointPaint);
-          canvas.drawLine(Offset(right, top), Offset(right, y), jointPaint);
+          // Segment joints — the leaning edges of the facet.
+          canvas.drawLine(Offset(xSb, y), Offset(xSt, top), jointPaint);
+          canvas.drawLine(Offset(xEb, y), Offset(xEt, top), jointPaint);
+          // Grain cue: staves read as vertical boards, so hint long grain up
+          // the facet; flat wedges show end grain (no hint).
+          if (isStave) {
+            final grain = Paint()
+              ..strokeWidth = 0.5
+              ..color = colors.ink.withValues(alpha: 0.16);
+            for (final f in const [0.33, 0.66]) {
+              canvas.drawLine(
+                Offset(xSb + (xEb - xSb) * f, y),
+                Offset(xSt + (xEt - xSt) * f, top),
+                grain,
+              );
+            }
+          }
         }
       }
 
       // Course separators so adjacent rings never bleed into one another:
-      // a firm line along this ring's top edge (its boundary with the ring
-      // above), plus the base's bottom edge for the very first ring.
+      // a firm line along this ring's (flared) top edge, plus the base's bottom
+      // edge for the very first ring.
       final courseSep = Paint()
         ..strokeWidth = 1.1
         ..color = colors.ink.withValues(alpha: 0.55);
-      canvas.drawLine(Offset(cx - ro, top), Offset(cx + ro, top), courseSep);
+      canvas.drawLine(Offset(cx - roT, top), Offset(cx + roT, top), courseSep);
       if (ringIndex == 0) {
-        canvas.drawLine(Offset(cx - ro, y), Offset(cx + ro, y), courseSep);
+        canvas.drawLine(Offset(cx - roB, y), Offset(cx + roB, y), courseSep);
       }
 
       if (ring.id == highlightRingId) {
+        final hr = math.max(roB, roT);
         canvas.drawRect(
-          Rect.fromLTRB(cx - ro - 2, top - 1, cx + ro + 2, y + 1),
+          Rect.fromLTRB(cx - hr - 2, top - 1, cx + hr + 2, y + 1),
           Paint()
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.8

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'material.dart';
 
 /// The construction style of a ring (course) in the stack.
@@ -76,6 +78,34 @@ class Ring {
 
   /// Radial wall width in mm.
   double get width => (outerDiameter - effectiveInnerDiameter) / 2.0;
+
+  /// Whether this course's wall is tilted (a cone frustum): compound rings and
+  /// tapered stave courses. Driven by [wallAngle]; 0° behaves like a flat ring.
+  bool get isTilted =>
+      (type == RingType.compound || type == RingType.stave) && wallAngle != 0.0;
+
+  /// Wall tilt from vertical, in radians (0 for flat rings).
+  double get wallTiltRad =>
+      (type == RingType.compound || type == RingType.stave)
+          ? wallAngle * math.pi / 180.0
+          : 0.0;
+
+  /// Radial rise from the base of the course to its top, from the wall tilt.
+  /// Stored [outerDiameter]/[innerDiameter] are the *base*; the wall flares
+  /// outward by this much over the course height. Zero for flat rings.
+  double get wallRiseMm => thickness * math.tan(wallTiltRad);
+
+  /// Outer diameter at the top of the course (base + flare).
+  double get topOuterDiameter => outerDiameter + 2 * wallRiseMm;
+
+  /// Inner diameter at the top of the course (base + flare); 0 for disks.
+  double get topInnerDiameter =>
+      effectiveInnerDiameter <= 0 ? 0.0 : effectiveInnerDiameter + 2 * wallRiseMm;
+
+  /// The widest outer diameter this course reaches (base or top), so layout and
+  /// bounds include an outward flare.
+  double get maxReachOuterDiameter =>
+      math.max(outerDiameter, topOuterDiameter);
 
   /// Whether this ring is a single solid board (no miters).
   bool get isSolid => type == RingType.disk && segmentCount <= 1;

@@ -94,10 +94,11 @@ class CutListView extends ConsumerWidget {
                       col('Type'),
                       col('Seg', numeric: true),
                       col('Miter', numeric: true),
-                      col('Outer edge ($u)', numeric: true),
-                      col('Inner edge ($u)', numeric: true),
+                      col('Bevel', numeric: true),
+                      col('Outer/width ($u)', numeric: true),
+                      col('Inner/width ($u)', numeric: true),
                       col('Wall ($u)', numeric: true),
-                      col('Height ($u)', numeric: true),
+                      col('Len/height ($u)', numeric: true),
                       col('Board len ($u)', numeric: true),
                       col('Bd-ft', numeric: true),
                     ],
@@ -111,7 +112,10 @@ class CutListView extends ConsumerWidget {
                               style: AppFonts.mono(
                                   TextStyle(fontSize: 10.5, color: c.faint)))),
                           mono('${s.physicalSegments}'),
-                          mono(s.solid ? '—' : '${s.miterAngleDeg.toStringAsFixed(2)}°'),
+                          mono(s.solid || s.stave
+                              ? '—'
+                              : '${s.miterAngleDeg.toStringAsFixed(2)}°'),
+                          mono(_bevelLabel(s)),
                           mono(v(s.outerEdgeMm)),
                           mono(s.innerEdgeMm > 0 ? v(s.innerEdgeMm) : '—'),
                           mono(v(s.wallWidthMm)),
@@ -127,13 +131,26 @@ class CutListView extends ConsumerWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            'Board length includes a ${v(project.kerfAllowanceMm)} $u handling/kerf allowance per segment.  '
+            'Board length includes a ${v(project.kerfAllowanceMm)} $u handling/kerf allowance per piece.  '
+            'Compound rings add a blade-tilt bevel = wall angle; staves are vertical boards '
+            '(rip bevel per long edge, outer/inner give the stave width, len = height).  '
             'Total ≈ ${RingGeometry.totalBoardFeet(project).toStringAsFixed(2)} board-feet.',
             style: AppFonts.ui(TextStyle(fontSize: 11.5, color: c.muted)),
           ),
         ],
       ),
     );
+  }
+
+  /// Blade-tilt bevel column: '—' when none, the angle otherwise, with a tapered
+  /// stave's end back-bevel appended.
+  static String _bevelLabel(RingCutSpec s) {
+    if (s.bevelAngleDeg <= 0.0001) return '—';
+    final main = '${s.bevelAngleDeg.toStringAsFixed(2)}°';
+    if (s.endBevelDeg > 0.0001) {
+      return '$main / ${s.endBevelDeg.toStringAsFixed(1)}° ends';
+    }
+    return main;
   }
 
   Future<void> _export(BuildContext context, WidgetRef ref) async {

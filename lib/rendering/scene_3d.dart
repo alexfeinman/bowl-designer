@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:vector_math/vector_math_64.dart' as vm;
 
 import '../models/bowl_project.dart';
+import '../models/ring.dart';
 
 /// A flat, colored polygon in world space (mm), tagged with its ring index.
 class _Face {
@@ -26,14 +27,25 @@ List<_Face> _buildFaces(BowlProject project) {
     final ring = project.rings[ri];
     final y0 = y;
     final y1 = y + ring.thickness;
-    final ro = ring.outerDiameter / 2;
-    final rInner = ring.effectiveInnerDiameter / 2;
+    final isStave = ring.type == RingType.stave;
+    // Stored diameters are the base; the wall flares outward by wallRiseMm over
+    // the course height (compound rings and tapered staves). Bottom = base,
+    // top = base + rise. Flat rings have rise 0 and behave exactly as before.
+    final rise = ring.wallRiseMm;
+    final roB = ring.outerDiameter / 2;
+    final roT = roB + rise;
+    final riB = ring.effectiveInnerDiameter / 2;
+    final riT = riB > 0 ? riB + rise : 0.0;
     final n = ring.segmentCount;
     final slot = 2 * math.pi / n;
     final half = ring.gapMm / 2; // flat gap: each face offset in by half
-    final rot = ri * (math.pi / n); // half-segment stagger per course
-    final so = math.sqrt(math.max(0.0, ro * ro - half * half));
-    final si = rInner > 0 ? math.sqrt(math.max(0.0, rInner * rInner - half * half)) : 0.0;
+    // Flat wedges brick-bond with a half-segment stagger per course; staves
+    // (vertical boards) stand in line, so no stagger.
+    final rot = isStave ? 0.0 : ri * (math.pi / n);
+    double chord(double r) => math.sqrt(math.max(0.0, r * r - half * half));
+    final soB = chord(roB), soT = chord(roT);
+    final siB = riB > 0 ? chord(riB) : 0.0;
+    final siT = riT > 0 ? chord(riT) : 0.0;
 
     for (var i = 0; i < n; i++) {
       final ta = i * slot + rot;
@@ -43,32 +55,33 @@ List<_Face> _buildFaces(BowlProject project) {
       final pa = Offset(-math.sin(ta), math.cos(ta));
       final ub = Offset(math.cos(tb), math.sin(tb));
       final qb = Offset(math.sin(tb), -math.cos(tb));
-      // Segment corners in the ring plane (flat, parallel-offset glue faces).
-      final oS = ua * so + pa * half;
-      final oE = ub * so + qb * half;
-      final iS = ua * si + pa * half;
-      final iE = ub * si + qb * half;
+      // Segment corners: base (b) at y0, top (t) at y1, flared by the tilt.
+      final oSb = ua * soB + pa * half, oSt = ua * soT + pa * half;
+      final oEb = ub * soB + qb * half, oEt = ub * soT + qb * half;
+      final iSb = ua * siB + pa * half, iSt = ua * siT + pa * half;
+      final iEb = ub * siB + qb * half, iEt = ub * siT + qb * half;
 
       final col = ring.materialAt(i).color;
       vm.Vector3 v(Offset c, double yy) => vm.Vector3(c.dx, yy, c.dy);
 
-      // Outer wall.
-      _addFace(faces, [v(oS, y0), v(oE, y0), v(oE, y1), v(oS, y1)], col, ri);
+      // Outer wall (leans out with the flare).
+      _addFace(faces, [v(oSb, y0), v(oEb, y0), v(oEt, y1), v(oSt, y1)], col, ri);
       // Inner wall.
-      if (rInner > 0.5) {
-        _addFace(faces, [v(iS, y0), v(iS, y1), v(iE, y1), v(iE, y0)], col, ri);
+      if (riB > 0.5 || riT > 0.5) {
+        _addFace(faces, [v(iSb, y0), v(iSt, y1), v(iEt, y1), v(iEb, y0)], col, ri);
       }
-      // Top and bottom faces (bottom on every course so the underside reads
-      // correctly when viewed from below).
-      _addFace(faces, [v(iS, y1), v(oS, y1), v(oE, y1), v(iE, y1)],
-          _lighten(col, 0.06), ri);
-      _addFace(faces, [v(oS, y0), v(iS, y0), v(iE, y0), v(oE, y0)],
-          _darken(col, 0.18), ri);
+      // Top and bottom faces. On a stave course these are exposed end grain, so
+      // darken both; on a flat ring the top is a fresh face and the bottom the
+      // shadowed underside.
+      _addFace(faces, [v(iSt, y1), v(oSt, y1), v(oEt, y1), v(iEt, y1)],
+          isStave ? _darken(col, 0.16) : _lighten(col, 0.06), ri);
+      _addFace(faces, [v(oSb, y0), v(iSb, y0), v(iEb, y0), v(oEb, y0)],
+          _darken(col, isStave ? 0.22 : 0.18), ri);
       // Exposed glue faces bounding the flat gap.
       if (half > 0.001) {
-        _addFace(faces, [v(iS, y0), v(oS, y0), v(oS, y1), v(iS, y1)],
+        _addFace(faces, [v(iSb, y0), v(oSb, y0), v(oSt, y1), v(iSt, y1)],
             _darken(col, 0.10), ri);
-        _addFace(faces, [v(oE, y0), v(iE, y0), v(iE, y1), v(oE, y1)],
+        _addFace(faces, [v(oEb, y0), v(iEb, y0), v(iEt, y1), v(oEt, y1)],
             _darken(col, 0.10), ri);
       }
     }
