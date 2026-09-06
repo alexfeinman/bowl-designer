@@ -30,6 +30,8 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
   final List<three.MeshPhongMaterial> _ringMats = [];
   bool _ready = false;
   int? _builtHash;
+  bool _builtTurned = false;
+  double? _builtWall;
   int _highlight = -1;
   three.Vector3 _homePos = three.Vector3(1, 1, 1);
   final three.Vector3 _homeTarget = three.Vector3();
@@ -71,6 +73,8 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
       ..dampingFactor = 0.08;
     threeJs.addAnimationEvent((dt) => _controls!.update());
 
+    _builtTurned = ref.read(turnedBowlProvider);
+    _builtWall = ref.read(xrayWallProvider);
     final project = ref.read(projectProvider);
     _rebuild(project);
     _frame(project);
@@ -91,7 +95,10 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
       _disposeGroup();
     }
     final g = three.Group();
-    for (final rt in buildRingTriangles(project)) {
+    final tris = _builtTurned
+        ? buildTurnedBowlTriangles(project, wallMm: _builtWall)
+        : buildRingTriangles(project);
+    for (final rt in tris) {
       final geo = three.BufferGeometry();
       geo.setAttributeFromString(
           'position', three.Float32BufferAttribute.fromList(rt.positions, 3));
@@ -156,7 +163,12 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     final ray = three.Raycaster();
     ray.setFromCamera(ndc, threeJs.camera);
     final hits = ray.intersectObjects(_ringMeshes, false);
-    if (hits.isEmpty) return;
+    if (hits.isEmpty) {
+      // Clicking empty space hides the highlight here without disturbing the
+      // ring list's selection.
+      ref.read(threeDHighlightSuppressedProvider.notifier).state = true;
+      return;
+    }
     final ri = hits.first.object?.userData['ringIndex'];
     final rings = ref.read(projectProvider).rings;
     if (ri is int && ri >= 0 && ri < rings.length) {
@@ -169,12 +181,21 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     final project = ref.watch(projectProvider);
     final selId = ref.watch(selectedRingIdProvider);
 
+    final suppressed = ref.watch(threeDHighlightSuppressedProvider);
+    final turned = ref.watch(turnedBowlProvider);
+    final wall = ref.watch(xrayWallProvider);
+
     if (_ready) {
-      if (identityHashCode(project) != _builtHash) {
+      if (identityHashCode(project) != _builtHash ||
+          turned != _builtTurned ||
+          wall != _builtWall) {
+        // Rebuild the mesh in place but keep the camera where the user left it —
+        // editing a ring should not snap the view back to the framed home.
+        _builtTurned = turned;
+        _builtWall = wall;
         _rebuild(project);
-        _frame(project);
       }
-      final hi = project.rings.indexWhere((r) => r.id == selId);
+      final hi = suppressed ? -1 : project.rings.indexWhere((r) => r.id == selId);
       if (hi != _highlight) {
         _highlight = hi;
         _applyHighlight();
@@ -200,10 +221,21 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
           ),
         ),
         Positioned(
+          left: 12,
+          top: 12,
+          child: _TurnedToggle(
+            turned: turned,
+            wallMm: wall,
+            onTap: () => ref.read(turnedBowlProvider.notifier).state = !turned,
+          ),
+        ),
+        Positioned(
           left: 14,
           bottom: 12,
           child: Text(
-            '3D · DRAG TO ORBIT · SCROLL / PINCH TO ZOOM · CLICK TO SELECT',
+            turned
+                ? '3D · TURNED BOWL · DRAG TO ORBIT · SCROLL TO ZOOM'
+                : '3D · DRAG TO ORBIT · SCROLL / PINCH TO ZOOM · CLICK TO SELECT',
             style: AppFonts.mono(TextStyle(
                 fontSize: 10.5,
                 letterSpacing: 0.6,
@@ -226,6 +258,53 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// A pill that toggles the 3D view between the glued rings and the turned bowl.
+class _TurnedToggle extends StatelessWidget {
+  const _TurnedToggle(
+      {required this.turned, required this.wallMm, required this.onTap});
+  final bool turned;
+  final double? wallMm;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = const Color(0xFFE0A54B);
+    return Material(
+      color: turned ? accent.withValues(alpha: 0.20) : Colors.white.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+                color: turned ? accent : Colors.white.withValues(alpha: 0.18)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(turned ? Icons.emoji_food_beverage : Icons.view_in_ar,
+                  size: 15,
+                  color: turned ? accent : Colors.white.withValues(alpha: 0.8)),
+              const SizedBox(width: 7),
+              Text(
+                turned ? 'Turned bowl' : 'Show turned',
+                style: AppFonts.ui(TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color:
+                        turned ? accent : Colors.white.withValues(alpha: 0.85))),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

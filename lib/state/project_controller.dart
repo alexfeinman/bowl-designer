@@ -197,6 +197,21 @@ final displayUnitProvider =
 final antialias3dProvider =
     Provider<bool>((ref) => ref.watch(projectProvider).antialias3d);
 
+/// Optional uniform finished-wall thickness (mm), shared by the X-ray wireframe
+/// and the 3D "turned bowl" preview so they show the same wall. Null = derive
+/// the wall from each ring's actual inner diameter.
+final xrayWallProvider = StateProvider<double?>((ref) => null);
+
+/// Whether the 3D view shows the *turned* bowl (the finished wall revolved)
+/// instead of the glued rings. Off by default.
+final turnedBowlProvider = StateProvider<bool>((ref) => false);
+
+/// Whether the 3D view is *locally* hiding its selection highlight because the
+/// user clicked empty space there. It does not touch the global selection (the
+/// ring list and inspector keep it), and any real [SelectionController.select]
+/// clears it so picking a ring — in the list or in 3D — re-shows the highlight.
+final threeDHighlightSuppressedProvider = StateProvider<bool>((ref) => false);
+
 /// Holds the currently selected ring id. Deliberately does NOT watch the
 /// project, so editing a ring never snaps the selection back to another ring.
 class SelectionController extends Notifier<String?> {
@@ -206,7 +221,13 @@ class SelectionController extends Notifier<String?> {
     return rings.isEmpty ? null : rings.last.id;
   }
 
-  void select(String? id) => state = id;
+  void select(String? id) {
+    state = id;
+    // Re-enable the 3D highlight whenever a ring is actively selected, even if
+    // it is the same id already selected (setting the same value would not
+    // notify on its own).
+    ref.read(threeDHighlightSuppressedProvider.notifier).state = false;
+  }
 }
 
 final selectionControllerProvider =

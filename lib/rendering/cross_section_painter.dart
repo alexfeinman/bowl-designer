@@ -16,6 +16,7 @@ class CrossSectionPainter extends CustomPainter {
     required this.colors,
     required this.unit,
     this.highlightRingId,
+    this.wireframeWallMm,
   });
 
   final BowlProject project;
@@ -23,6 +24,11 @@ class CrossSectionPainter extends CustomPainter {
   final BowlColors colors;
   final LengthUnit unit;
   final String? highlightRingId;
+
+  /// When set (mm), the x-ray finished wall is drawn at this uniform thickness
+  /// on every course except the bottom (which stays the floor). Null = derive
+  /// the wall from each ring's actual inner diameter.
+  final double? wireframeWallMm;
 
   static const double padX = 70.0;
   static const double padTop = 40.0;
@@ -142,7 +148,7 @@ class CrossSectionPainter extends CustomPainter {
 
     // X-ray: overlay a wireframe of the thickest bowl that fits the blank —
     // the outer silhouette follows each course OD, the bore follows each ID.
-    if (xray) _paintProfileWireframe(canvas, cx, bands);
+    if (xray) _paintProfileWireframe(canvas, cx, bands, scale);
 
     // Centerline.
     final center = Paint()
@@ -198,10 +204,12 @@ class CrossSectionPainter extends CustomPainter {
   /// ring where it binds and curving in between. A light final clamp guards any
   /// residual overshoot from non-monotonic stacks. [bands] entries are
   /// [top, bottom, outerR, innerR] in screen px, base first.
-  void _paintProfileWireframe(Canvas canvas, double cx, List<List<double>> bands) {
+  void _paintProfileWireframe(
+      Canvas canvas, double cx, List<List<double>> bands, double scale) {
     if (bands.isEmpty) return;
     final topRim = bands.last[0];
     final baseBottom = bands.first[1];
+    final baseTopY = bands.first[0]; // floor level: below this stays solid
 
     // Radius of the stock block at height [yy]. [outer] picks the outer wall
     // (indices 2=top, 3=bottom) or the bore (4=top, 5=bottom), interpolating
@@ -235,11 +243,22 @@ class CrossSectionPainter extends CustomPainter {
     final ys = [for (var i = 0; i <= n; i++) topRim + (baseBottom - topRim) * i / n];
     final outer = _monotone(oy, or, ys);
     final inner = _monotone(iy, ir, ys);
+    final wallPx = wireframeWallMm == null ? null : wireframeWallMm! * scale;
     for (var i = 0; i < ys.length; i++) {
       // Ride inside the blocks; keep the bore within the wall so it never
       // inverts and never opens a hole where the block is solid.
       outer[i] = math.min(outer[i], blockR(ys[i], true));
-      inner[i] = math.max(inner[i], blockR(ys[i], false));
+      if (wallPx != null && ys[i] < baseTopY - 0.5) {
+        // Uniform finished wall on every course above the floor: bore the
+        // inside to leave exactly this thickness, but never inside the glued
+        // hole (turning removes material, it cannot add it).
+        inner[i] = math.max(outer[i] - wallPx, blockR(ys[i], false));
+      } else if (wallPx != null) {
+        // The bottom course is the floor — keep it as glued (solid disk / hole).
+        inner[i] = blockR(ys[i], false);
+      } else {
+        inner[i] = math.max(inner[i], blockR(ys[i], false));
+      }
       inner[i] = math.min(math.max(0.0, inner[i]), outer[i]);
     }
 
@@ -389,5 +408,6 @@ class CrossSectionPainter extends CustomPainter {
       old.xray != xray ||
       old.highlightRingId != highlightRingId ||
       old.unit != unit ||
+      old.wireframeWallMm != wireframeWallMm ||
       old.colors != colors;
 }

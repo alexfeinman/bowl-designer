@@ -541,14 +541,35 @@ class _Materials extends ConsumerWidget {
     void setPattern(List<SegmentMaterial> p) =>
         ctrl.updateRing(ring.id, (r) => r.copyWith(pattern: p));
 
+    void reorder(int oldIndex, int newIndex) {
+      final next = [...pattern];
+      if (newIndex > oldIndex) newIndex -= 1;
+      final item = next.removeAt(oldIndex);
+      next.insert(newIndex.clamp(0, next.length), item);
+      setPattern(next);
+    }
+
     return _Fieldset(
       legend: 'Material · pattern',
       children: [
-        for (var i = 0; i < pattern.length; i++)
-          Padding(
+        // The pattern is applied in order around the ring; drag the handles to
+        // reorder, like the ring stack.
+        ReorderableListView.builder(
+          shrinkWrap: true,
+          buildDefaultDragHandles: false,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: pattern.length,
+          onReorder: reorder,
+          itemBuilder: (context, i) => Padding(
+            key: ValueKey('pat-$i'),
             padding: const EdgeInsets.only(bottom: 8),
             child: Row(
               children: [
+                ReorderableDragStartListener(
+                  index: i,
+                  child: Icon(Icons.drag_indicator, size: 16, color: c.faint),
+                ),
+                const SizedBox(width: 6),
                 Container(
                   width: 18,
                   height: 18,
@@ -583,13 +604,13 @@ class _Materials extends ConsumerWidget {
                     tooltip: 'Remove',
                     iconSize: 16,
                     visualDensity: VisualDensity.compact,
-                    onPressed: () =>
-                        setPattern([...pattern]..removeAt(i)),
+                    onPressed: () => setPattern([...pattern]..removeAt(i)),
                     icon: Icon(Icons.close, color: c.faint),
                   ),
               ],
             ),
           ),
+        ),
         if (pattern.length < 6)
           Align(
             alignment: Alignment.centerLeft,

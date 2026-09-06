@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/units.dart';
 import '../../rendering/cross_section_painter.dart';
 import '../../rendering/elevation_painter.dart';
 import '../../state/project_controller.dart';
@@ -63,6 +64,7 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
     // Grid is a Side-elevation aid only; the X-ray never draws one.
     final gridAllowed = !xray;
     final showGrid = gridAllowed && ref.watch(gridVisibleProvider);
+    final wallMm = xray ? ref.watch(xrayWallProvider) : null;
     return LayoutBuilder(
       builder: (context, cons) {
         final size = Size(cons.maxWidth, cons.maxHeight);
@@ -73,6 +75,7 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
                 colors: c,
                 unit: unit,
                 highlightRingId: selId,
+                wireframeWallMm: wallMm,
               )
             : ElevationPainter(
                 project: project,
@@ -117,6 +120,12 @@ class _ViewAreaState extends ConsumerState<ViewArea> {
                     onTap: () =>
                         ref.read(gridVisibleProvider.notifier).state = !showGrid,
                   ),
+                ),
+              if (xray)
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: _XrayWallControl(value: wallMm, unit: unit),
                 ),
             ],
           ),
@@ -240,6 +249,80 @@ class _ViewLabel extends StatelessWidget {
           letterSpacing: 0.6,
           color: c.faint,
         )),
+      ),
+    );
+  }
+}
+
+/// X-ray control: toggle and set a uniform finished-wall thickness to preview
+/// the turned wall. Off shows the wall implied by each ring's actual bore.
+class _XrayWallControl extends ConsumerWidget {
+  const _XrayWallControl({required this.value, required this.unit});
+  final double? value;
+  final LengthUnit unit;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.colors;
+    final on = value != null;
+    final step = UnitFormat.coarseStep(unit);
+    void set(double? mm) => ref.read(xrayWallProvider.notifier).state = mm;
+
+    Widget iconBtn(IconData icon, VoidCallback onTap, String tip) => Tooltip(
+          message: tip,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: Icon(icon, size: 15, color: c.accent),
+            ),
+          ),
+        );
+
+    return Material(
+      color: on ? c.accentSoft : c.surface,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: on ? c.accent : c.borderStrong),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.straighten, size: 15, color: on ? c.accent : c.muted),
+            const SizedBox(width: 6),
+            Text('Wall',
+                style: AppFonts.ui(TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: on ? c.accent : c.muted))),
+            if (!on)
+              Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: iconBtn(Icons.visibility_outlined,
+                    () => set(ref.read(projectProvider).targetWallMm), 'Preview a uniform finished wall'),
+              )
+            else ...[
+              const SizedBox(width: 8),
+              iconBtn(Icons.remove, () => set((value! - step).clamp(0.5, 1e6)),
+                  'Thinner'),
+              SizedBox(
+                width: 42,
+                child: Text(
+                  UnitFormat.withUnit(value!, unit),
+                  textAlign: TextAlign.center,
+                  style: AppFonts.mono(TextStyle(fontSize: 11.5, color: c.ink)),
+                ),
+              ),
+              iconBtn(Icons.add, () => set(value! + step), 'Thicker'),
+              const SizedBox(width: 2),
+              iconBtn(Icons.close, () => set(null), 'Show actual bore'),
+            ],
+          ],
+        ),
       ),
     );
   }
