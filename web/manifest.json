@@ -1,11 +1,11 @@
 {
-    "name": "segmented_bowl_designer",
-    "short_name": "segmented_bowl_designer",
+    "name": "Segmented Bowl Designer",
+    "short_name": "Bowl Designer",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#1c130c",
+    "theme_color": "#e0a54b",
+    "description": "Design segmented turned bowls — rings, cut list, and 3D preview.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
