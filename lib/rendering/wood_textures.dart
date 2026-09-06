@@ -25,12 +25,9 @@ class WoodTextures {
   };
 
   /// A render-time colour tint (ARGB) multiplied over the photo when grain is on.
-  /// White for species whose photo is a true match; a hue shift for the exotics
-  /// that reuse a neighbour's grain (see CREDITS.md).
-  static const Map<String, int> _tint = {
-    'padauk': 0xFFFFB07A, // warm the red-oak grain toward padauk's orange-red
-    'purpleheart': 0xFFA06BDC, // push the ash grain toward purple
-  };
+  /// Every shipped species now has a true-colour photo, so all tints are white;
+  /// this stays as the hook for any future reused/neutral grain (see CREDITS.md).
+  static const Map<String, int> _tint = {};
 
   static final Map<String, three.Texture> _cache = {};
   static final Set<String> _loading = {};

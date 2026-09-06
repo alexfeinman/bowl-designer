@@ -39,11 +39,10 @@ void main() {
       expect(WoodTextures.assetIdFor(m(0xFFFFF3E0)), 'maple'); // very light
     });
 
-    test('true-match species are untinted; reused exotics carry a tint', () {
-      expect(WoodTextures.tintFor('maple'), 0xFFFFFFFF);
-      expect(WoodTextures.tintFor('walnut'), 0xFFFFFFFF);
-      expect(WoodTextures.tintFor('padauk'), isNot(0xFFFFFFFF));
-      expect(WoodTextures.tintFor('purpleheart'), isNot(0xFFFFFFFF));
+    test('every shipped species has a true-colour photo (no tint)', () {
+      for (final id in ids) {
+        expect(WoodTextures.tintFor(id), 0xFFFFFFFF, reason: '$id tinted');
+      }
     });
   });
 }
