@@ -70,8 +70,27 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     _disposed = true;
     _controls?.dispose();
     if (threeJs.mounted) threeJs.dispose();
+    // These textures were uploaded to THIS view's renderer; they must not
+    // outlive it (a new 3D-tab visit builds fresh ones from cached pixels).
+    for (final t in _grainTex.values) {
+      t.dispose();
+    }
+    _grainTex.clear();
     three.loading.clear();
     super.dispose();
+  }
+
+  /// Wood-grain textures built for and owned by this view instance (its
+  /// renderer), keyed by species asset id. Built lazily from WoodTextures'
+  /// renderer-independent decoded pixels.
+  final Map<String, three.Texture> _grainTex = {};
+
+  three.Texture? _textureFor(String assetId) {
+    final existing = _grainTex[assetId];
+    if (existing != null) return existing;
+    final tex = WoodTextures.makeTexture(assetId); // null until pixels decoded
+    if (tex != null) _grainTex[assetId] = tex;
+    return tex;
   }
 
   /// Mark the scene dirty and ensure a frame is pumped. Cheap to call often.
@@ -200,11 +219,12 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
         // be loading, in which case we show the tinted flat colour and attach
         // the map when it arrives.
         mat.color.setFromHex32(WoodTextures.tintFor(assetId) & 0xFFFFFF);
-        final tex = WoodTextures.cached(assetId);
+        final tex = _textureFor(assetId);
         if (tex != null) {
           mat.map = tex;
         } else {
-          // No texture yet: fall back to the species colour so it isn't white.
+          // Pixels not decoded yet: fall back to the species colour (not white)
+          // and attach the texture once it's ready.
           mat.color.setFromHex32(rt.baseColor & 0xFFFFFF);
           pending.add(assetId);
         }
@@ -237,7 +257,7 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     for (var i = 0; i < _ringMats.length; i++) {
       if (_matAsset[i] == kGapMaterialId) continue; // glue lines stay flat
       if (_ringMats[i].map != null) continue;
-      final tex = WoodTextures.cached(_matAsset[i]);
+      final tex = _textureFor(_matAsset[i]);
       if (tex != null) {
         _ringMats[i].map = tex;
         _ringMats[i].color.setFromHex32(WoodTextures.tintFor(_matAsset[i]) & 0xFFFFFF);
