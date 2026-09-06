@@ -8,6 +8,7 @@ import '../../models/bowl_project.dart';
 import '../../rendering/scene_3d.dart';
 import '../../rendering/trackpad_orbit_controls.dart';
 import '../../rendering/wood_textures.dart';
+import '../widgets/wood_icon.dart';
 import '../../state/project_controller.dart';
 import '../theme.dart';
 
@@ -439,9 +440,7 @@ class _TurnedToggle extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(turned ? Icons.emoji_food_beverage : Icons.view_in_ar,
-                  size: 15,
-                  color: turned ? accent : Colors.white.withValues(alpha: 0.8)),
+              WoodIcon(turned ? WoodIcons.bowl : WoodIcons.cube, size: 18),
               const SizedBox(width: 7),
               Text(
                 turned ? 'Turned bowl' : 'Show turned',

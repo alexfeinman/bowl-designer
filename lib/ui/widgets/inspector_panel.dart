@@ -9,6 +9,7 @@ import '../../models/units.dart';
 import '../../state/project_controller.dart';
 import '../shortcuts.dart';
 import '../theme.dart';
+import 'wood_icon.dart';
 
 /// Right pane: edit the selected ring plus the Auto-fit walls tool.
 class InspectorPanel extends ConsumerWidget {
@@ -163,7 +164,7 @@ class _TypeButton extends StatelessWidget {
         ),
         child: Column(
           children: [
-            Icon(_icon(type), size: 18, color: color),
+            WoodIcon(_icon(type), size: 22, opacity: selected ? 1.0 : 0.72),
             const SizedBox(height: 4),
             Text(
               type.label,
@@ -179,11 +180,11 @@ class _TypeButton extends StatelessWidget {
     );
   }
 
-  IconData _icon(RingType t) => switch (t) {
-        RingType.disk => Icons.circle,
-        RingType.normal => Icons.circle_outlined,
-        RingType.compound => Icons.change_history,
-        RingType.stave => Icons.view_column_outlined,
+  String _icon(RingType t) => switch (t) {
+        RingType.disk => WoodIcons.disk,
+        RingType.normal => WoodIcons.ring,
+        RingType.compound => WoodIcons.compound,
+        RingType.stave => WoodIcons.stave,
       };
 }
 

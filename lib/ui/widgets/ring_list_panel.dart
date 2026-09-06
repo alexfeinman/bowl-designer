@@ -6,6 +6,7 @@ import '../../models/ring.dart';
 import '../../models/units.dart';
 import '../../state/project_controller.dart';
 import '../theme.dart';
+import 'wood_icon.dart';
 
 /// Left pane: the stack of rings, shown top → bottom, reorderable.
 class RingListPanel extends ConsumerWidget {
@@ -34,7 +35,7 @@ class RingListPanel extends ConsumerWidget {
             title: 'RING STACK · TOP → BOTTOM',
             trailing: TextButton.icon(
               onPressed: () => _addAndSelect(ref),
-              icon: const Icon(Icons.add, size: 16),
+              icon: const WoodIcon(WoodIcons.addRing, size: 20),
               label: const Text('Add'),
               style: TextButton.styleFrom(foregroundColor: c.accent),
             ),
