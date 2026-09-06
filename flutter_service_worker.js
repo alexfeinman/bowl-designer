@@ -3,11 +3,11 @@ const MANIFEST = 'flutter-app-manifest';
 const TEMP = 'flutter-temp-cache';
 const CACHE_NAME = 'flutter-app-cache';
 
-const RESOURCES = {"flutter_bootstrap.js": "161479cb9b0967e6f61871cbd41326c8",
+const RESOURCES = {"flutter_bootstrap.js": "774b3406987ba8c3620242213c61b6a7",
 "version.json": "90f7162f113a89f0d695675a1328e303",
 "index.html": "ffe32b91891e4f022f2d8c1d29150c63",
 "/": "ffe32b91891e4f022f2d8c1d29150c63",
-"main.dart.js": "045594dbfebd64d3a8babde7ec488797",
+"main.dart.js": "d03060dc6d140c88e197ee661b8b1994",
 "gles_bindings.js": "9c00c4a51e5c48933957966960684267",
 "flutter.js": "76f08d47ff9f5715220992f993002504",
 "favicon.png": "300c44aa22d924983a1b4e102c6d86f2",
@@ -25,7 +25,7 @@ const RESOURCES = {"flutter_bootstrap.js": "161479cb9b0967e6f61871cbd41326c8",
 "assets/packages/three_js_controls/assets/joystick_knob.png": "bb0811554c35e7d74df6d80fb5ff5cd5",
 "assets/shaders/ink_sparkle.frag": "ecc85a2e95f5e9f53123dcaf8cb9b6ce",
 "assets/AssetManifest.bin": "5f6e8eee25fcee47dd5644f43e72dac5",
-"assets/fonts/MaterialIcons-Regular.otf": "1d2912fe7a4077f99dd650989b60252c",
+"assets/fonts/MaterialIcons-Regular.otf": "56027ebc44f06477d6413a764e5a912d",
 "assets/assets/textures/wood/ash.jpg": "f4b9738a1f72219e3b4e3315331f98c2",
 "assets/assets/textures/wood/CREDITS.md": "7dcd6c0783af154894b3f918c9c13bac",
 "assets/assets/textures/wood/wenge.jpg": "775858e16da74010d425b2d6083f4ba8",
