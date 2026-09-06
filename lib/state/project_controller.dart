@@ -158,6 +158,11 @@ class ProjectController extends Notifier<ProjectHistory> {
     _persist();
   }
 
+  void setWoodGrain(bool on) {
+    state = state.replaceCurrent(project.copyWith(woodGrain: on));
+    _persist();
+  }
+
   void setKerfAllowance(double mm) {
     state = state.replaceCurrent(project.copyWith(kerfAllowanceMm: mm));
     _persist();
@@ -196,6 +201,10 @@ final displayUnitProvider =
 /// Whether the 3D view is antialiased (lives on the project, so it persists).
 final antialias3dProvider =
     Provider<bool>((ref) => ref.watch(projectProvider).antialias3d);
+
+/// Whether the 3D view overlays photographic wood grain (lives on the project).
+final woodGrainProvider =
+    Provider<bool>((ref) => ref.watch(projectProvider).woodGrain);
 
 /// Optional uniform finished-wall thickness (mm), shared by the X-ray wireframe
 /// and the 3D "turned bowl" preview so they show the same wall. Null = derive

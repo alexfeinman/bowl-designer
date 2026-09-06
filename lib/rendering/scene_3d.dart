@@ -8,16 +8,32 @@ import '../geometry/wall_profile.dart';
 import '../models/bowl_project.dart';
 import '../models/ring.dart';
 
-/// A flat, colored polygon in world space (mm), tagged with its ring index.
+/// One full texture tile spans this many millimetres of wood, the same in both
+/// directions (isotropic), so grain is **scaled to the real segment size**: a
+/// tall segment shows proportionally more grain than a short one, and the grain
+/// never stretches. Tune this one number to make the figure coarser/finer.
+const double grainTileMm = 90.0;
+
+/// A flat polygon in world space (mm). For the GPU path each vertex carries a
+/// grayscale [shade] multiplier (lighting/darkening cues, species-independent)
+/// and a wood-grain UV; the segment's species is named by [materialId] and its
+/// flat colour by [baseColor] (used when the grain overlay is off). Grouping by
+/// (ringIndex, materialId) lets each species become its own textured mesh.
 class _Face {
-  _Face(this.points, this.color, this.shade, this.ringIndex);
+  _Face(this.points, this.ringIndex, this.materialId, this.baseColor, this.shade,
+      this.uvs);
   final List<vm.Vector3> points;
-  final Color color;
-  final double shade;
   final int ringIndex;
+  final String materialId;
+  final int baseColor; // ARGB
+  final double shade; // 0..1 grayscale multiplier
+  final List<Offset> uvs;
 }
 
-const _light = [0.35, 0.82, 0.45];
+/// Isotropic grain UV for a corner, given its along-grain and across-grain
+/// distances in mm (grain runs along the texture's U axis).
+Offset _uv(double alongMm, double acrossMm) =>
+    Offset(alongMm / grainTileMm, acrossMm / grainTileMm);
 
 List<_Face> _buildFaces(BowlProject project) {
   final faces = <_Face>[];
@@ -49,6 +65,10 @@ List<_Face> _buildFaces(BowlProject project) {
     final siB = riB > 0 ? chord(riB) : 0.0;
     final siT = riT > 0 ? chord(riT) : 0.0;
 
+    void add(List<vm.Vector3> pts, String matId, int baseCol, double shade,
+            List<Offset> uvs) =>
+        faces.add(_Face(pts, ri, matId, baseCol, shade, uvs));
+
     for (var i = 0; i < n; i++) {
       final ta = i * slot + rot;
       final tb = (i + 1) * slot + rot;
@@ -63,28 +83,44 @@ List<_Face> _buildFaces(BowlProject project) {
       final iSb = ua * siB + pa * half, iSt = ua * siT + pa * half;
       final iEb = ub * siB + qb * half, iEt = ub * siT + qb * half;
 
-      final col = ring.materialAt(i).color;
+      final mat = ring.materialAt(i);
+      final matId = mat.id;
+      final baseCol = mat.colorValue;
       vm.Vector3 v(Offset c, double yy) => vm.Vector3(c.dx, yy, c.dy);
 
+      // UV distances. On a flat ring the grain runs tangentially (along each
+      // board's length); on a stave it runs vertically. Isotropic scale, so we
+      // simply choose which axis is "along" the grain.
+      final aOut = ta * roB, bOut = tb * roB; // tangential arc (outer)
+      final aIn = ta * (riB > 0 ? riB : roB), bIn = tb * (riB > 0 ? riB : roB);
+      Offset wallUv(double arc, double yy) =>
+          isStave ? _uv(yy, arc) : _uv(arc, yy);
+
       // Outer wall (leans out with the flare).
-      _addFace(faces, [v(oSb, y0), v(oEb, y0), v(oEt, y1), v(oSt, y1)], col, ri);
+      add([v(oSb, y0), v(oEb, y0), v(oEt, y1), v(oSt, y1)], matId, baseCol, 1.0,
+          [wallUv(aOut, y0), wallUv(bOut, y0), wallUv(bOut, y1), wallUv(aOut, y1)]);
       // Inner wall.
       if (riB > 0.5 || riT > 0.5) {
-        _addFace(faces, [v(iSb, y0), v(iSt, y1), v(iEt, y1), v(iEb, y0)], col, ri);
+        add([v(iSb, y0), v(iSt, y1), v(iEt, y1), v(iEb, y0)], matId, baseCol, 1.0,
+            [wallUv(aIn, y0), wallUv(aIn, y1), wallUv(bIn, y1), wallUv(bIn, y0)]);
       }
       // Top and bottom faces. On a stave course these are exposed end grain, so
       // darken both; on a flat ring the top is a fresh face and the bottom the
-      // shadowed underside.
-      _addFace(faces, [v(iSt, y1), v(oSt, y1), v(oEt, y1), v(iEt, y1)],
-          isStave ? _darken(col, 0.16) : _lighten(col, 0.06), ri);
-      _addFace(faces, [v(oSb, y0), v(iSb, y0), v(iEb, y0), v(oEb, y0)],
-          _darken(col, isStave ? 0.22 : 0.18), ri);
+      // shadowed underside. Grain across the ring width (radius) here.
+      add([v(iSt, y1), v(oSt, y1), v(oEt, y1), v(iEt, y1)], matId, baseCol,
+          isStave ? 0.84 : 1.0, [
+        _uv(aIn, siT), _uv(aOut, soT), _uv(bOut, soT), _uv(bIn, siT)
+      ]);
+      add([v(oSb, y0), v(iSb, y0), v(iEb, y0), v(oEb, y0)], matId, baseCol,
+          isStave ? 0.78 : 0.82, [
+        _uv(aOut, soB), _uv(aIn, siB), _uv(bIn, siB), _uv(bOut, soB)
+      ]);
       // Exposed glue faces bounding the flat gap.
       if (half > 0.001) {
-        _addFace(faces, [v(iSb, y0), v(oSb, y0), v(oSt, y1), v(iSt, y1)],
-            _darken(col, 0.10), ri);
-        _addFace(faces, [v(oEb, y0), v(iEb, y0), v(iEt, y1), v(oEt, y1)],
-            _darken(col, 0.10), ri);
+        add([v(iSb, y0), v(oSb, y0), v(oSt, y1), v(iSt, y1)], matId, baseCol, 0.90,
+            [_uv(siB, y0), _uv(soB, y0), _uv(soT, y1), _uv(siT, y1)]);
+        add([v(oEb, y0), v(iEb, y0), v(iEt, y1), v(oEt, y1)], matId, baseCol, 0.90,
+            [_uv(soB, y0), _uv(siB, y0), _uv(siT, y1), _uv(soT, y1)]);
       }
     }
     y = y1;
@@ -92,59 +128,80 @@ List<_Face> _buildFaces(BowlProject project) {
   return faces;
 }
 
-void _addFace(List<_Face> faces, List<vm.Vector3> pts, Color color, int ri) {
-  final normal = (pts[1] - pts[0]).cross(pts[2] - pts[0])..normalize();
-  final l = vm.Vector3(_light[0], _light[1], _light[2])..normalize();
-  final shade = (0.55 + 0.45 * normal.dot(l).abs()).clamp(0.0, 1.0);
-  faces.add(_Face(pts, color, shade, ri));
-}
-
-/// Triangulated geometry for one ring: interleaved xyz positions and rgb (0..1)
-/// vertex colours, 3 vertices per triangle. Feeds a GPU mesh (three_js).
+/// Triangulated geometry for one ring + species: interleaved xyz positions,
+/// rgb (0..1) shade multipliers, and grain UVs, 3 vertices per triangle. Feeds
+/// a GPU mesh (three_js). [baseColor] is the species' flat colour (grain off);
+/// [materialId] selects its grain texture (grain on).
 class RingTriangles {
-  RingTriangles(this.ringIndex, this.positions, this.colors);
+  RingTriangles(this.ringIndex, this.materialId, this.baseColor, this.positions,
+      this.colors, this.uvs);
   final int ringIndex;
+  final String materialId;
+  final int baseColor;
   final Float32List positions;
   final Float32List colors;
+  final Float32List uvs;
 }
 
-/// Build per-ring triangle buffers from the same geometry the 2D/OBJ paths use.
-/// Colours are the raw segment material colours; GPU lighting does the shading.
-List<RingTriangles> buildRingTriangles(BowlProject project) {
-  final pos = <int, List<double>>{};
-  final col = <int, List<double>>{};
-  for (final f in _buildFaces(project)) {
-    final p = pos.putIfAbsent(f.ringIndex, () => <double>[]);
-    final c = col.putIfAbsent(f.ringIndex, () => <double>[]);
-    final cr = f.color.r, cg = f.color.g, cb = f.color.b;
-    void emit(vm.Vector3 v) {
-      p..add(v.x)..add(v.y)..add(v.z);
-      c..add(cr)..add(cg)..add(cb);
+class _Bucket {
+  _Bucket(this.ringIndex, this.materialId, this.baseColor);
+  final int ringIndex;
+  final String materialId;
+  final int baseColor;
+  final List<double> pos = [];
+  final List<double> col = [];
+  final List<double> uv = [];
+}
+
+/// Build per-(ring, species) triangle buffers from the same geometry the 2D/OBJ
+/// paths use. Vertex colours are grayscale shade multipliers; the species hue
+/// comes from the material (flat colour, or the grain texture).
+List<RingTriangles> buildRingTriangles(BowlProject project) =>
+    _bucketize(_buildFaces(project));
+
+List<RingTriangles> _bucketize(List<_Face> faces) {
+  final buckets = <String, _Bucket>{};
+  for (final f in faces) {
+    final key = '${f.ringIndex}|${f.materialId}';
+    final b = buckets.putIfAbsent(
+        key, () => _Bucket(f.ringIndex, f.materialId, f.baseColor));
+    final s = f.shade;
+    void emit(vm.Vector3 v, Offset uv) {
+      b.pos..add(v.x)..add(v.y)..add(v.z);
+      b.col..add(s)..add(s)..add(s);
+      b.uv..add(uv.dx)..add(uv.dy);
     }
 
     // Triangulate the (convex) face as a fan.
     for (var k = 1; k < f.points.length - 1; k++) {
-      emit(f.points[0]);
-      emit(f.points[k]);
-      emit(f.points[k + 1]);
+      emit(f.points[0], f.uvs[0]);
+      emit(f.points[k], f.uvs[k]);
+      emit(f.points[k + 1], f.uvs[k + 1]);
     }
   }
-  final ids = pos.keys.toList()..sort();
+  final keys = buckets.keys.toList()
+    ..sort((a, b) {
+      final ba = buckets[a]!, bb = buckets[b]!;
+      final c = ba.ringIndex.compareTo(bb.ringIndex);
+      return c != 0 ? c : ba.materialId.compareTo(bb.materialId);
+    });
   return [
-    for (final ri in ids)
+    for (final k in keys)
       RingTriangles(
-          ri, Float32List.fromList(pos[ri]!), Float32List.fromList(col[ri]!))
+        buckets[k]!.ringIndex,
+        buckets[k]!.materialId,
+        buckets[k]!.baseColor,
+        Float32List.fromList(buckets[k]!.pos),
+        Float32List.fromList(buckets[k]!.col),
+        Float32List.fromList(buckets[k]!.uv),
+      )
   ];
 }
 
-Color _lighten(Color c, double t) => Color.lerp(c, const Color(0xFFFFFFFF), t)!;
-Color _darken(Color c, double t) => Color.lerp(c, const Color(0xFF000000), t)!;
-
 /// Triangle buffers for the *turned* bowl: the finished wall (from
 /// [computeWallProfile]) revolved into a smooth surface of revolution. Grouped
-/// by the ring each height belongs to, so ring highlight/picking still works.
-/// Vertical facets carry the segment materials as stripes, approximating how the
-/// glue-up shows on the turned surface.
+/// by (ring, species) — each course's real segment arcs (rotation + gaps) colour
+/// the surface, so it matches the glued-rings view. Grain runs tangentially.
 List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
     {double? wallMm, int samples = 120}) {
   final prof = computeWallProfile(project, wallMm: wallMm, samples: samples);
@@ -154,49 +211,58 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
   if (rings.isEmpty) return const [];
   final rotations = project.ringRotationsRad();
 
-  final pos = <int, List<double>>{};
-  final col = <int, List<double>>{};
-  void emit(int ri, vm.Vector3 v, Color c) {
-    (pos[ri] ??= <double>[])..add(v.x)..add(v.y)..add(v.z);
-    (col[ri] ??= <double>[])..add(c.r)..add(c.g)..add(c.b);
+  final buckets = <String, _Bucket>{};
+  _Bucket bucket(int ri, String matId, int baseCol) => buckets.putIfAbsent(
+      '$ri|$matId', () => _Bucket(ri, matId, baseCol));
+
+  void emit(_Bucket b, vm.Vector3 v, double shade, Offset uv) {
+    b.pos..add(v.x)..add(v.y)..add(v.z);
+    b.col..add(shade)..add(shade)..add(shade);
+    b.uv..add(uv.dx)..add(uv.dy);
   }
 
   vm.Vector3 pt(double r, double yMm, double ang) =>
       vm.Vector3(r * math.cos(ang), y0 + yMm, r * math.sin(ang));
 
-  void quad(int ri, vm.Vector3 a, vm.Vector3 b, vm.Vector3 c, vm.Vector3 d,
-      Color color) {
-    emit(ri, a, color);
-    emit(ri, b, color);
-    emit(ri, c, color);
-    emit(ri, a, color);
-    emit(ri, c, color);
-    emit(ri, d, color);
+  // a,b,c,d given as (r, yMm, ang); uv computed isotropically from arc & height.
+  void wallQuad(_Bucket b, double shade, double ra, double ya, double aAng,
+      double rb, double yb, double bAng) {
+    final a = pt(ra, ya, aAng), c = pt(rb, yb, bAng);
+    final d = pt(ra, ya, bAng), e = pt(rb, yb, aAng);
+    // Wound so the outward face is front (caller flips r-order for the bore).
+    Offset uvAt(double r, double yMm, double ang) => _uv(ang * r, yMm);
+    emit(b, a, shade, uvAt(ra, ya, aAng));
+    emit(b, e, shade, uvAt(rb, yb, aAng));
+    emit(b, c, shade, uvAt(rb, yb, bAng));
+    emit(b, a, shade, uvAt(ra, ya, aAng));
+    emit(b, c, shade, uvAt(rb, yb, bAng));
+    emit(b, d, shade, uvAt(ra, ya, bAng));
   }
 
-  // Colour arcs around one course, honouring its rotation and gaps — the same
-  // segment layout the glued-rings view shows. A gap becomes a thin dark arc
-  // (the glue line), so the turned surface reads the segments and gaps.
-  const gapShade = 0.34;
-  List<(double, double, Color)> arcsFor(int ringIdx) {
+  // One course's arcs: (a0, a1, materialId, baseColor, shade). Gaps become a
+  // darker arc of the same species (the glue line), so the surface reads the
+  // segments and gaps as in the glued-rings view.
+  const gapShade = 0.55;
+  List<(double, double, String, int, double)> arcsFor(int ringIdx) {
     final r = rings[ringIdx];
     final segN = r.segmentCount;
     final rot = rotations[ringIdx];
     if (segN <= 1) {
-      return [(rot, rot + 2 * math.pi, r.materialAt(0).color)];
+      final m = r.materialAt(0);
+      return [(rot, rot + 2 * math.pi, m.id, m.colorValue, 1.0)];
     }
     final slot = 2 * math.pi / segN;
     final gap = r.gapAngle; // radians
-    final arcs = <(double, double, Color)>[];
+    final arcs = <(double, double, String, int, double)>[];
     for (var i = 0; i < segN; i++) {
       final base = rot + i * slot;
-      final mat = r.materialAt(i).color;
+      final m = r.materialAt(i);
       if (gap > 1e-4) {
-        arcs.add((base + gap / 2, base + slot - gap / 2, mat));
-        arcs.add((base + slot - gap / 2, base + slot + gap / 2,
-            _darken(mat, gapShade)));
+        arcs.add((base + gap / 2, base + slot - gap / 2, m.id, m.colorValue, 1.0));
+        arcs.add(
+            (base + slot - gap / 2, base + slot + gap / 2, m.id, m.colorValue, gapShade));
       } else {
-        arcs.add((base, base + slot, mat));
+        arcs.add((base, base + slot, m.id, m.colorValue, 1.0));
       }
     }
     return arcs;
@@ -214,29 +280,29 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
     final ri = prof.ringAt[i];
     final ya = prof.ys[i], yb = prof.ys[i + 1];
     final ra = prof.outerR[i], rb = prof.outerR[i + 1];
-    for (final (a0, a1, color) in ringArcs[ri]) {
+    for (final (a0, a1, matId, baseCol, sh) in ringArcs[ri]) {
+      final b = bucket(ri, matId, baseCol);
       final st = steps(a1 - a0);
       for (var s = 0; s < st; s++) {
-        final b0 = a0 + (a1 - a0) * s / st, b1 = a0 + (a1 - a0) * (s + 1) / st;
-        quad(ri, pt(ra, ya, b0), pt(rb, yb, b0), pt(rb, yb, b1), pt(ra, ya, b1),
-            _darken(color, 0.02));
+        final c0 = a0 + (a1 - a0) * s / st, c1 = a0 + (a1 - a0) * (s + 1) / st;
+        wallQuad(b, sh * 0.98, ra, ya, c0, rb, yb, c1);
       }
     }
   }
 
-  // Bore — revolve the inner profile where it is open (above the floor).
+  // Bore — revolve the inner profile where it is open (above the floor). Wound
+  // the other way so the lit face points into the bore.
   for (var i = 0; i < n - 1; i++) {
     if (prof.innerR[i] <= eps || prof.innerR[i + 1] <= eps) continue;
     final ri = prof.ringAt[i];
     final ya = prof.ys[i], yb = prof.ys[i + 1];
     final ra = prof.innerR[i], rb = prof.innerR[i + 1];
-    for (final (a0, a1, color) in ringArcs[ri]) {
+    for (final (a0, a1, matId, baseCol, sh) in ringArcs[ri]) {
+      final b = bucket(ri, matId, baseCol);
       final st = steps(a1 - a0);
       for (var s = 0; s < st; s++) {
-        final b0 = a0 + (a1 - a0) * s / st, b1 = a0 + (a1 - a0) * (s + 1) / st;
-        // Wound the other way so the lit face points into the bore.
-        quad(ri, pt(ra, ya, b1), pt(rb, yb, b1), pt(rb, yb, b0), pt(ra, ya, b0),
-            _darken(color, 0.14));
+        final c0 = a0 + (a1 - a0) * s / st, c1 = a0 + (a1 - a0) * (s + 1) / st;
+        wallQuad(b, sh * 0.86, ra, ya, c1, rb, yb, c0);
       }
     }
   }
@@ -252,14 +318,14 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
   if (floorIdx > 0) {
     final yf = prof.ys[floorIdx];
     final rf = prof.innerR[floorIdx];
-    for (final (a0, a1, color) in ringArcs[0]) {
+    for (final (a0, a1, matId, baseCol, sh) in ringArcs[0]) {
+      final b = bucket(0, matId, baseCol);
       final st = steps(a1 - a0);
-      final c = _lighten(color, 0.06);
       for (var s = 0; s < st; s++) {
-        final b0 = a0 + (a1 - a0) * s / st, b1 = a0 + (a1 - a0) * (s + 1) / st;
-        emit(0, pt(0, yf, 0), c);
-        emit(0, pt(rf, yf, b0), c);
-        emit(0, pt(rf, yf, b1), c);
+        final c0 = a0 + (a1 - a0) * s / st, c1 = a0 + (a1 - a0) * (s + 1) / st;
+        emit(b, pt(0, yf, 0), sh, _uv(0, 0));
+        emit(b, pt(rf, yf, c0), sh, _uv(c0 * rf, rf));
+        emit(b, pt(rf, yf, c1), sh, _uv(c1 * rf, rf));
       }
     }
   }
@@ -270,35 +336,50 @@ List<RingTriangles> buildTurnedBowlTriangles(BowlProject project,
   final roTop = prof.outerR[top], riBore = prof.innerR[top];
   if (riBore > eps) {
     final yTop = prof.ys[top];
-    for (final (a0, a1, color) in ringArcs[riTop]) {
+    for (final (a0, a1, matId, baseCol, sh) in ringArcs[riTop]) {
+      final b = bucket(riTop, matId, baseCol);
       final st = steps(a1 - a0);
-      final c = _lighten(color, 0.05);
       for (var s = 0; s < st; s++) {
-        final b0 = a0 + (a1 - a0) * s / st, b1 = a0 + (a1 - a0) * (s + 1) / st;
-        quad(riTop, pt(riBore, yTop, b0), pt(roTop, yTop, b0),
-            pt(roTop, yTop, b1), pt(riBore, yTop, b1), c);
+        final c0 = a0 + (a1 - a0) * s / st, c1 = a0 + (a1 - a0) * (s + 1) / st;
+        emit(b, pt(riBore, yTop, c0), sh, _uv(c0 * riBore, riBore));
+        emit(b, pt(roTop, yTop, c0), sh, _uv(c0 * roTop, roTop));
+        emit(b, pt(roTop, yTop, c1), sh, _uv(c1 * roTop, roTop));
+        emit(b, pt(riBore, yTop, c0), sh, _uv(c0 * riBore, riBore));
+        emit(b, pt(roTop, yTop, c1), sh, _uv(c1 * roTop, roTop));
+        emit(b, pt(riBore, yTop, c1), sh, _uv(c1 * riBore, riBore));
       }
     }
   }
 
   // Underside disk at the base (base-course arcs, seen from below).
   final rBot = prof.outerR[0];
-  for (final (a0, a1, color) in ringArcs[0]) {
+  for (final (a0, a1, matId, baseCol, sh) in ringArcs[0]) {
+    final b = bucket(0, matId, baseCol);
     final st = steps(a1 - a0);
-    final c = _darken(color, 0.2);
     for (var s = 0; s < st; s++) {
-      final b0 = a0 + (a1 - a0) * s / st, b1 = a0 + (a1 - a0) * (s + 1) / st;
-      emit(0, pt(0, prof.ys[0], 0), c);
-      emit(0, pt(rBot, prof.ys[0], b1), c);
-      emit(0, pt(rBot, prof.ys[0], b0), c);
+      final c0 = a0 + (a1 - a0) * s / st, c1 = a0 + (a1 - a0) * (s + 1) / st;
+      emit(b, pt(0, prof.ys[0], 0), sh * 0.8, _uv(0, 0));
+      emit(b, pt(rBot, prof.ys[0], c1), sh * 0.8, _uv(c1 * rBot, rBot));
+      emit(b, pt(rBot, prof.ys[0], c0), sh * 0.8, _uv(c0 * rBot, rBot));
     }
   }
 
-  final ids = pos.keys.toList()..sort();
+  final keys = buckets.keys.toList()
+    ..sort((a, b) {
+      final ba = buckets[a]!, bb = buckets[b]!;
+      final c = ba.ringIndex.compareTo(bb.ringIndex);
+      return c != 0 ? c : ba.materialId.compareTo(bb.materialId);
+    });
   return [
-    for (final ri in ids)
+    for (final k in keys)
       RingTriangles(
-          ri, Float32List.fromList(pos[ri]!), Float32List.fromList(col[ri]!))
+        buckets[k]!.ringIndex,
+        buckets[k]!.materialId,
+        buckets[k]!.baseColor,
+        Float32List.fromList(buckets[k]!.pos),
+        Float32List.fromList(buckets[k]!.col),
+        Float32List.fromList(buckets[k]!.uv),
+      )
   ];
 }
 

@@ -13,6 +13,7 @@ class SettingsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final c = context.colors;
     final aa = ref.watch(antialias3dProvider);
+    final grain = ref.watch(woodGrainProvider);
     final unit = ref.watch(displayUnitProvider);
     final ctrl = ref.read(projectControllerProvider.notifier);
 
@@ -49,6 +50,24 @@ class SettingsPage extends ConsumerWidget {
                   subtitle: Text(
                       'Smoother edges in the 3D view. Supersamples the render, '
                       'so it is a little slower.',
+                      style:
+                          AppFonts.ui(TextStyle(fontSize: 12, color: c.muted))),
+                ),
+                Divider(height: 1, color: c.border),
+                SwitchListTile(
+                  value: grain,
+                  onChanged: ctrl.setWoodGrain,
+                  activeColor: c.accent,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  title: Text('Wood grain',
+                      style: AppFonts.ui(TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: c.ink))),
+                  subtitle: Text(
+                      'Overlay photographic per-species grain on the 3D bowl '
+                      'instead of flat colours. Scaled to each segment.',
                       style:
                           AppFonts.ui(TextStyle(fontSize: 12, color: c.muted))),
                 ),

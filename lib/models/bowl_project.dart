@@ -15,6 +15,7 @@ class BowlProject {
     this.kerfAllowanceMm = 6.0,
     this.targetWallMm = 8.0,
     this.antialias3d = false,
+    this.woodGrain = false,
     this.formatVersion = 1,
   });
 
@@ -35,6 +36,10 @@ class BowlProject {
   /// Whether the 3D view is antialiased (supersampled). A view preference that
   /// travels with the document so it persists across sessions and saves.
   final bool antialias3d;
+
+  /// Whether the 3D view overlays photographic per-species wood grain. A view
+  /// preference that travels with the document, like [antialias3d].
+  final bool woodGrain;
 
   final int formatVersion;
 
@@ -65,6 +70,7 @@ class BowlProject {
     double? kerfAllowanceMm,
     double? targetWallMm,
     bool? antialias3d,
+    bool? woodGrain,
   }) =>
       BowlProject(
         name: name ?? this.name,
@@ -73,6 +79,7 @@ class BowlProject {
         kerfAllowanceMm: kerfAllowanceMm ?? this.kerfAllowanceMm,
         targetWallMm: targetWallMm ?? this.targetWallMm,
         antialias3d: antialias3d ?? this.antialias3d,
+        woodGrain: woodGrain ?? this.woodGrain,
         formatVersion: formatVersion,
       );
 
@@ -83,6 +90,7 @@ class BowlProject {
         'kerfAllowanceMm': kerfAllowanceMm,
         'targetWallMm': targetWallMm,
         'antialias3d': antialias3d,
+        'woodGrain': woodGrain,
         'rings': rings.map((r) => r.toJson()).toList(),
       };
 
@@ -95,6 +103,7 @@ class BowlProject {
         kerfAllowanceMm: (json['kerfAllowanceMm'] as num?)?.toDouble() ?? 6.0,
         targetWallMm: (json['targetWallMm'] as num?)?.toDouble() ?? 8.0,
         antialias3d: json['antialias3d'] as bool? ?? false,
+        woodGrain: json['woodGrain'] as bool? ?? false,
         rings: [
           for (final r in (json['rings'] as List? ?? const []))
             Ring.fromJson(r as Map<String, dynamic>)

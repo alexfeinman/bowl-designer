@@ -17,6 +17,13 @@ void main() {
       expect(BowlProject.fromJson(json).antialias3d, isFalse);
     });
 
+    test('woodGrain round-trips and defaults to false for older files', () {
+      final on = BowlProject.sample().copyWith(woodGrain: true);
+      expect(BowlProject.fromJson(on.toJson()).woodGrain, isTrue);
+      final json = BowlProject.sample().toJson()..remove('woodGrain');
+      expect(BowlProject.fromJson(json).woodGrain, isFalse);
+    });
+
     test('per-ring rotationDeg round-trips (null stays auto)', () {
       final p = BowlProject.sample();
       final withRot = p.copyWith(rings: [

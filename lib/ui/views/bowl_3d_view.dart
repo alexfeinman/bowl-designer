@@ -7,6 +7,7 @@ import 'package:three_js/three_js.dart' as three;
 import '../../models/bowl_project.dart';
 import '../../rendering/scene_3d.dart';
 import '../../rendering/trackpad_orbit_controls.dart';
+import '../../rendering/wood_textures.dart';
 import '../../state/project_controller.dart';
 import '../theme.dart';
 
@@ -28,9 +29,14 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
   three.Group? _group;
   final List<three.Mesh> _ringMeshes = [];
   final List<three.MeshPhongMaterial> _ringMats = [];
+  // Parallel to _ringMats: the ring each material mesh belongs to (a ring can
+  // now span several meshes, one per species), and the grain asset it wants.
+  final List<int> _ringOfMat = [];
+  final List<String> _matAsset = [];
   bool _ready = false;
   int? _builtHash;
   bool _builtTurned = false;
+  bool _builtGrain = false;
   double? _builtWall;
   int _highlight = -1;
   three.Vector3 _homePos = three.Vector3(1, 1, 1);
@@ -138,6 +144,7 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
 
     _builtTurned = ref.read(turnedBowlProvider);
     _builtWall = ref.read(xrayWallProvider);
+    _builtGrain = ref.read(woodGrainProvider);
     final project = ref.read(projectProvider);
     _rebuild(project);
     _frame(project);
@@ -146,10 +153,15 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
   void _disposeGroup() {
     for (final m in _ringMeshes) {
       m.geometry?.dispose();
+      // The grain textures are shared and cached (WoodTextures) — detach so the
+      // material's dispose() does not free a texture other meshes still use.
+      m.material?.map = null;
       m.material?.dispose();
     }
     _ringMeshes.clear();
     _ringMats.clear();
+    _ringOfMat.clear();
+    _matAsset.clear();
   }
 
   void _rebuild(BowlProject project) {
@@ -161,35 +173,82 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     final tris = _builtTurned
         ? buildTurnedBowlTriangles(project, wallMm: _builtWall)
         : buildRingTriangles(project);
+    final grain = _builtGrain;
+    final pending = <String>{};
     for (final rt in tris) {
       final geo = three.BufferGeometry();
       geo.setAttributeFromString(
           'position', three.Float32BufferAttribute.fromList(rt.positions, 3));
       geo.setAttributeFromString(
           'color', three.Float32BufferAttribute.fromList(rt.colors, 3));
+      geo.setAttributeFromString(
+          'uv', three.Float32BufferAttribute.fromList(rt.uvs, 2));
       geo.computeVertexNormals();
+      final assetId = WoodTextures.assetIdRaw(rt.materialId, rt.baseColor);
       final mat = three.MeshPhongMaterial.fromMap({
         'vertexColors': true,
         'side': three.DoubleSide,
-        'shininess': 14,
-        'specular': 0x0d0d0d,
+        'shininess': grain ? 24 : 14,
+        'specular': grain ? 0x141414 : 0x0d0d0d,
         'emissive': 0x000000,
       });
+      if (grain) {
+        // Grain photo × tint × grayscale shade. Tint is white for true-match
+        // species and a hue shift for the reused exotics. The texture may still
+        // be loading, in which case we show the tinted flat colour and attach
+        // the map when it arrives.
+        mat.color.setFromHex32(WoodTextures.tintFor(assetId) & 0xFFFFFF);
+        final tex = WoodTextures.cached(assetId);
+        if (tex != null) {
+          mat.map = tex;
+        } else {
+          // No texture yet: fall back to the species colour so it isn't white.
+          mat.color.setFromHex32(rt.baseColor & 0xFFFFFF);
+          pending.add(assetId);
+        }
+      } else {
+        mat.color.setFromHex32(rt.baseColor & 0xFFFFFF);
+      }
+      mat.needsUpdate = true;
       final mesh = three.Mesh(geo, mat);
       mesh.userData['ringIndex'] = rt.ringIndex;
       g.add(mesh);
       _ringMeshes.add(mesh);
       _ringMats.add(mat);
+      _ringOfMat.add(rt.ringIndex);
+      _matAsset.add(assetId);
     }
     _group = g;
     threeJs.scene.add(g);
     _builtHash = identityHashCode(project);
     _applyHighlight();
+    if (grain && pending.isNotEmpty) {
+      WoodTextures.ensure(pending, _onGrainLoaded);
+    }
+  }
+
+  /// A grain texture finished decoding: attach it to any material that wanted it
+  /// and is still showing the flat fallback, then re-render.
+  void _onGrainLoaded() {
+    if (_disposed || !_builtGrain) return;
+    var changed = false;
+    for (var i = 0; i < _ringMats.length; i++) {
+      if (_ringMats[i].map != null) continue;
+      final tex = WoodTextures.cached(_matAsset[i]);
+      if (tex != null) {
+        _ringMats[i].map = tex;
+        _ringMats[i].color.setFromHex32(WoodTextures.tintFor(_matAsset[i]) & 0xFFFFFF);
+        _ringMats[i].needsUpdate = true;
+        changed = true;
+      }
+    }
+    if (changed) _requestRender();
   }
 
   void _applyHighlight() {
     for (var i = 0; i < _ringMats.length; i++) {
-      _ringMats[i].emissive?.setFromHex32(i == _highlight ? 0x6b4a12 : 0x000000);
+      _ringMats[i].emissive
+          ?.setFromHex32(_ringOfMat[i] == _highlight ? 0x6b4a12 : 0x000000);
       _ringMats[i].needsUpdate = true;
     }
     _requestRender();
@@ -249,15 +308,18 @@ class _Bowl3DViewState extends ConsumerState<Bowl3DView> {
     final suppressed = ref.watch(threeDHighlightSuppressedProvider);
     final turned = ref.watch(turnedBowlProvider);
     final wall = ref.watch(xrayWallProvider);
+    final grain = ref.watch(woodGrainProvider);
 
     if (_ready) {
       if (identityHashCode(project) != _builtHash ||
           turned != _builtTurned ||
-          wall != _builtWall) {
+          wall != _builtWall ||
+          grain != _builtGrain) {
         // Rebuild the mesh in place but keep the camera where the user left it —
         // editing a ring should not snap the view back to the framed home.
         _builtTurned = turned;
         _builtWall = wall;
+        _builtGrain = grain;
         _rebuild(project);
       }
       final hi = suppressed ? -1 : project.rings.indexWhere((r) => r.id == selId);

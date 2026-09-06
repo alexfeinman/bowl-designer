@@ -5,19 +5,43 @@ import 'package:segmented_bowl_designer/rendering/scene_3d.dart';
 
 void main() {
   group('3D mesh geometry', () {
-    test('builds one triangle buffer per ring, 3 xyz + 3 rgb per vertex', () {
+    test('buffers are whole triangles with matching colour + uv counts', () {
       final project = BowlProject.sample();
-      final rings = buildRingTriangles(project);
-      expect(rings.length, project.rings.length);
-      for (final rt in rings) {
+      final tris = buildRingTriangles(project);
+      expect(tris.isNotEmpty, isTrue);
+      for (final rt in tris) {
         expect(rt.positions.length % 9, 0); // whole triangles (3 verts * xyz)
         expect(rt.colors.length, rt.positions.length); // rgb matches xyz count
+        // uv: 2 per vertex, and 3 verts per xyz-triple.
+        expect(rt.uvs.length, rt.positions.length ~/ 3 * 2);
         expect(rt.positions.isNotEmpty, isTrue);
-        // colours are normalized 0..1
+        expect(rt.materialId.isNotEmpty, isTrue);
         for (final c in rt.colors) {
-          expect(c >= 0 && c <= 1, isTrue);
+          expect(c >= 0 && c <= 1, isTrue); // normalized shade multipliers
+        }
+        for (final v in rt.positions) {
+          expect(v.isFinite, isTrue);
         }
       }
+    });
+
+    test('every ring is represented by at least one buffer', () {
+      final project = BowlProject.sample();
+      final tris = buildRingTriangles(project);
+      final ringIdx = tris.map((t) => t.ringIndex).toSet();
+      for (var i = 0; i < project.rings.length; i++) {
+        expect(ringIdx.contains(i), isTrue);
+      }
+    });
+
+    test('a two-species ring splits into a buffer per material', () {
+      final project = BowlProject.sample();
+      // Ring 1 (index 1) uses a two-wood pattern → two material buffers.
+      final forRing1 = buildRingTriangles(project)
+          .where((t) => t.ringIndex == 1)
+          .map((t) => t.materialId)
+          .toSet();
+      expect(forRing1.length, greaterThanOrEqualTo(2));
     });
 
     test('exports an OBJ with vertices and faces', () {
@@ -40,14 +64,18 @@ void main() {
       ]);
     }
 
-    test('produces finite, in-range, whole-triangle buffers per ring', () {
+    test('produces finite, in-range, whole-triangle buffers with uvs', () {
       final tris = buildTurnedBowlTriangles(gapped());
       expect(tris.isNotEmpty, isTrue);
       for (final rt in tris) {
         expect(rt.positions.length % 9, 0);
         expect(rt.colors.length, rt.positions.length);
+        expect(rt.uvs.length, rt.positions.length ~/ 3 * 2);
         expect(rt.positions.isNotEmpty, isTrue);
         for (final v in rt.positions) {
+          expect(v.isFinite, isTrue);
+        }
+        for (final v in rt.uvs) {
           expect(v.isFinite, isTrue);
         }
         for (final c in rt.colors) {
