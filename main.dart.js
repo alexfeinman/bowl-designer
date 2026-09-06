@@ -97872,7 +97872,7 @@ j=s.c
 i=l+r
 if(o){h=i-n
 p.push(new A.uv([l+n,h,k,j,1]))
-p.push(new A.uv([h,i+n,k,j,0.55]))}else p.push(new A.uv([l,i,k,j,1]))}return p},
+p.push(new A.uv([h,i+n,"__gap__",4280555538,1]))}else p.push(new A.uv([l,i,k,j,1]))}return p},
 $S:602}
 A.aD9.prototype={
 $1(a){return Math.max(1,B.n.fS(a/0.06544984694978735))},
@@ -98582,13 +98582,13 @@ if(!n)o.j()}B.l.B(s)
 B.l.B(m.Q)
 B.l.B(m.as)
 B.l.B(m.at)},
-Uy(b3){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a,a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,b0,b1=this,b2=b1.y
-if(b2!=null){s=b1.w
+Uy(b4){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b,a,a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,b0,b1,b2=this,b3=b2.y
+if(b3!=null){s=b2.w
 s===$&&A.b()
 s=s.ax
 s===$&&A.b()
-s.F(0,b2)
-b1.aiR()}b2=A.au()
+s.F(0,b3)
+b2.aiR()}b3=A.au()
 s=A.cH(0,0,0,1)
 r=A.bb()
 q=A.au()
@@ -98609,13 +98609,13 @@ d=A.bb()
 c=t.N
 b=t.z
 a=$.kK().a
-a0=new A.Cd(b2,s,r,q,p,o,n,m,l,k,j,i,h,g.toLowerCase(),f,e,d,!0,!0,new A.hR(),A.j(c,b),A.j(c,b),A.a4(a[0],a[1],a[2]),A.a4(0,0,0),A.hf(0,0,0,null),A.cH(0,0,0,1),A.a4(1,1,1),A.bb(),A.by(),A.a([],t.n),A.j(c,t.G))
+a0=new A.Cd(b3,s,r,q,p,o,n,m,l,k,j,i,h,g.toLowerCase(),f,e,d,!0,!0,new A.hR(),A.j(c,b),A.j(c,b),A.a4(a[0],a[1],a[2]),A.a4(0,0,0),A.hf(0,0,0,null),A.cH(0,0,0,1),A.a4(1,1,1),A.bb(),A.by(),A.a([],t.n),A.j(c,t.G))
 a0.hF()
 a0.cy="Group"
-a1=b1.ch?A.b4N(b3,b1.cx):A.b2s(A.b2t(b3))
-a2=b1.CW
+a1=b2.ch?A.b4N(b4,b2.cx):A.b2s(A.b2t(b4))
+a2=b2.CW
 a3=A.as(c)
-for(b2=a1.length,s=b1.z,r=b1.Q,q=b1.as,p=b1.at,a4=0;a4<a1.length;a1.length===b2||(0,A.w)(a1),++a4){a5=a1[a4]
+for(b3=a1.length,s=b2.z,r=b2.Q,q=b2.as,p=b2.at,a4=0;a4<a1.length;a1.length===b3||(0,A.w)(a1),++a4){a5=a1[a4]
 a6=A.MY()
 o=a5.d
 n=new A.hJ(o.length)
@@ -98636,42 +98636,47 @@ n.b=4
 n=A.il(n,2,!1)
 a6.as.k(0,"uv",n)
 a6.ax2()
-n=a5.c
-a7=A.b0U(a5.b,n)
-o=a2?24:14
-a8=A.aYf(A.k(["vertexColors",!0,"side",2,"shininess",o,"specular",a2?1315860:855309,"emissive",0],c,b))
-o=a8.a8
-if(a2){B.E9.h(0,a7)
-o.wd(16777215)
-a9=$.arf.h(0,a7)
-if(a9!=null)a8.cD=a9
-else{a8.a8.wd(n&16777215)
-a3.A(0,a7)}}else o.wd(n&16777215);++a8.W
-b0=A.oY(a6,a8)
+n=a5.b
+a7=n==="__gap__"
+o=a5.c
+a8=A.b0U(n,o)
+n=a2?24:14
+a9=A.aYf(A.k(["vertexColors",!0,"side",2,"shininess",n,"specular",a2?1315860:855309,"emissive",0],c,b))
+n=a2&&!a7
+m=a9.a8
+if(n){B.E9.h(0,a8)
+m.wd(16777215)
+b0=$.arf.h(0,a8)
+if(b0!=null)a9.cD=b0
+else{a9.a8.wd(o&16777215)
+a3.A(0,a8)}}else m.wd(o&16777215);++a9.W
+b1=A.oY(a6,a9)
 o=a5.a
-b0.p3.k(0,"ringIndex",o)
-a0.jM(b0)
-s.push(b0)
-r.push(a8)
+b1.p3.k(0,"ringIndex",o)
+a0.jM(b1)
+s.push(b1)
+r.push(a9)
 q.push(o)
-p.push(a7)}b1.y=a0
-b2=b1.w
-b2===$&&A.b()
-b2=b2.ax
-b2===$&&A.b()
-b2.jM(a0)
-b1.ay=A.m2(b3)
-b1.Uq()
-if(a2&&a3.a!==0)A.b0V(a3,b1.gapF())},
+p.push(a7?"__gap__":a8)}b2.y=a0
+b3=b2.w
+b3===$&&A.b()
+b3=b3.ax
+b3===$&&A.b()
+b3.jM(a0)
+b2.ay=A.m2(b4)
+b2.Uq()
+if(a2&&a3.a!==0)A.b0V(a3,b2.gapF())},
 apG(){var s,r,q,p,o,n,m=this
 if(m.dy||!m.CW)return
-for(s=m.Q,r=m.at,q=!1,p=0;p<s.length;++p){if(s[p].cD!=null)continue
-o=$.arf.h(0,r[p])
-if(o!=null){n=s[p]
-n.cD=o
-n=n.a8
+for(s=m.Q,r=m.at,q=!1,p=0;p<s.length;++p){o=r[p]
+if(o==="__gap__")continue
+if(s[p].cD!=null)continue
+n=$.arf.h(0,o)
+if(n!=null){o=s[p]
+o.cD=n
+o=o.a8
 B.E9.h(0,r[p])
-n.wd(16777215);++s[p].W
+o.wd(16777215);++s[p].W
 q=!0}}if(q){m.fy=!0
 m.ql()}},
 Uq(){var s,r,q,p,o=this
