@@ -87,14 +87,25 @@ class WoodTextures {
     tex.wrapS = three.RepeatWrapping;
     tex.wrapT = three.RepeatWrapping;
     tex.magFilter = three.LinearFilter;
-    tex.minFilter = three.LinearMipmapLinearFilter;
-    tex.generateMipmaps = true;
-    tex.anisotropy = 8;
+    // Mipmaps + REPEAT wrap require power-of-two dimensions; a non-POT texture
+    // would otherwise be GPU-incomplete and sample as garbage (neon/static). All
+    // shipped assets are 512×512, but guard so a stray size degrades gracefully.
+    final pot = _isPow2(d.width) && _isPow2(d.height);
+    if (pot) {
+      tex.minFilter = three.LinearMipmapLinearFilter;
+      tex.generateMipmaps = true;
+      tex.anisotropy = 8;
+    } else {
+      tex.minFilter = three.LinearFilter;
+      tex.generateMipmaps = false;
+    }
     tex.colorSpace = three.SRGBColorSpace;
     tex.flipY = false;
     tex.needsUpdate = true;
     return tex;
   }
+
+  static bool _isPow2(int n) => n > 0 && (n & (n - 1)) == 0;
 
   static Future<DecodedWood?> _decode(String assetId) async {
     try {

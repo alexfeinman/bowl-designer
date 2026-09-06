@@ -13,14 +13,19 @@ void main() {
       'maple', 'walnut', 'cherry', 'oak', 'ash', 'padauk', 'wenge', 'purpleheart',
     ];
 
-    test('every species image is present and decodes to a real bitmap', () async {
+    bool isPow2(int n) => n > 0 && (n & (n - 1)) == 0;
+
+    test('every species image decodes and is a power-of-two square', () async {
       for (final id in ids) {
         final bytes = await rootBundle.load('assets/textures/wood/$id.jpg');
         expect(bytes.lengthInBytes, greaterThan(0), reason: '$id.jpg empty');
         final codec = await ui.instantiateImageCodec(bytes.buffer.asUint8List());
         final frame = await codec.getNextFrame();
-        expect(frame.image.width, greaterThan(0));
-        expect(frame.image.height, greaterThan(0));
+        final w = frame.image.width, h = frame.image.height;
+        // Mipmaps + REPEAT wrap need power-of-two dims, else the GPU texture is
+        // incomplete and samples as garbage. Keep them POT (and square).
+        expect(isPow2(w) && isPow2(h), isTrue, reason: '$id is ${w}x$h (not POT)');
+        expect(w, h, reason: '$id not square (${w}x$h)');
         frame.image.dispose();
       }
     });

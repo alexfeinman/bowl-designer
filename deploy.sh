@@ -20,6 +20,12 @@ if [[ "$current" == "$BRANCH" ]]; then
   exit 1
 fi
 
+# Gate the build on texture validation: every bundled wood image must decode and
+# be a power-of-two square, else the 3D grain samples as garbage on the GPU
+# (see test/wood_textures_test.dart). Fails fast before building.
+echo "▶ Validating bundled wood textures…"
+flutter test test/wood_textures_test.dart
+
 echo "▶ Building web release (base href $BASE_HREF)…"
 flutter build web --release --base-href "$BASE_HREF"
 
