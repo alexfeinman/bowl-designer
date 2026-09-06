@@ -86,26 +86,20 @@ class WoodTextures {
     final tex = three.DataTexture(d.data, d.width, d.height, three.RGBAFormat);
     tex.wrapS = three.RepeatWrapping;
     tex.wrapT = three.RepeatWrapping;
+    // No mipmaps: flutter_angle does not reliably build a mipmap chain for a
+    // DataTexture, so a mipmap minFilter leaves the texture GPU-incomplete and
+    // minified surfaces (a bowl's floor centre, a razor-thin wall seen edge-on)
+    // sample as RGB static. Linear min/mag on the base level is always complete —
+    // it only shimmers a little at extreme minification, never turns to noise.
     tex.magFilter = three.LinearFilter;
-    // Mipmaps + REPEAT wrap require power-of-two dimensions; a non-POT texture
-    // would otherwise be GPU-incomplete and sample as garbage (neon/static). All
-    // shipped assets are 512×512, but guard so a stray size degrades gracefully.
-    final pot = _isPow2(d.width) && _isPow2(d.height);
-    if (pot) {
-      tex.minFilter = three.LinearMipmapLinearFilter;
-      tex.generateMipmaps = true;
-      tex.anisotropy = 8;
-    } else {
-      tex.minFilter = three.LinearFilter;
-      tex.generateMipmaps = false;
-    }
+    tex.minFilter = three.LinearFilter;
+    tex.generateMipmaps = false;
+    tex.anisotropy = 1;
     tex.colorSpace = three.SRGBColorSpace;
     tex.flipY = false;
     tex.needsUpdate = true;
     return tex;
   }
-
-  static bool _isPow2(int n) => n > 0 && (n & (n - 1)) == 0;
 
   static Future<DecodedWood?> _decode(String assetId) async {
     try {
