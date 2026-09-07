@@ -12,21 +12,40 @@ Future<String?> saveBytes(
   required String typeLabel,
   required List<String> extensions,
 }) async {
+  // Suggest the base WITHOUT our extension. An unregistered extension like
+  // ".sbowl" is not recognised by the macOS save panel, so if we leave it on
+  // the suggested name the panel treats the whole thing as the base and appends
+  // the accepted extension again — showing "Bowl.sbowl.sbowl". Handing over a
+  // bare base lets the panel add the extension exactly once.
+  final suggestedBase = stripAcceptedExtension(filename, extensions);
   final location = await getSaveLocation(
-    suggestedName: filename,
+    suggestedName: suggestedBase,
     acceptedTypeGroups: [XTypeGroup(label: typeLabel, extensions: extensions)],
   );
   if (location == null) return null;
-  final path = _collapseDoubledExtension(location.path, extensions);
+  // Enforce exactly one accepted extension on the result: collapse a double
+  // (belt and braces), and add one if the platform left it off (GTK doesn't).
+  final path = withSingleExtension(location.path, extensions);
   await File(path).writeAsBytes(Uint8List.fromList(bytes));
   return path.split(RegExp(r'[/\\]')).last;
 }
 
-/// Some save panels (notably macOS NSSavePanel) append the type extension to a
-/// suggested name that already carried it, yielding e.g. "Bowl.sbowl.sbowl".
-/// Collapse a doubled accepted extension so the file — and the name reported to
-/// callers — carries it exactly once. A no-op when there's no doubling.
-String _collapseDoubledExtension(String path, List<String> extensions) {
+/// Drop a single trailing accepted extension from [name], if present.
+/// Public for testing.
+String stripAcceptedExtension(String name, List<String> extensions) {
+  for (final ext in extensions) {
+    final dotExt = '.$ext';
+    if (name.toLowerCase().endsWith(dotExt.toLowerCase())) {
+      return name.substring(0, name.length - dotExt.length);
+    }
+  }
+  return name;
+}
+
+/// Ensure [path] ends with exactly one accepted extension: collapse any doubles,
+/// then append the primary extension if none of the accepted ones is present.
+/// Public for testing.
+String withSingleExtension(String path, List<String> extensions) {
   var p = path;
   for (final ext in extensions) {
     final doubled = '.$ext.$ext';
@@ -34,5 +53,7 @@ String _collapseDoubledExtension(String path, List<String> extensions) {
       p = p.substring(0, p.length - ext.length - 1); // drop one ".$ext"
     }
   }
-  return p;
+  final hasExt = extensions
+      .any((e) => p.toLowerCase().endsWith('.${e.toLowerCase()}'));
+  return hasExt ? p : '$p.${extensions.first}';
 }
