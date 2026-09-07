@@ -21,6 +21,20 @@ void main() {
       // A rename that drops our suffix: keep whatever base the user typed.
       expect(ProjectIo.baseFromFilename('MyList.csv', '-cutlist'), 'MyList');
     });
+
+    test('a doubled extension collapses to a single clean base', () {
+      // macOS save panels can append the type extension to a name that already
+      // had it — the base must not keep the stray ".sbowl".
+      expect(ProjectIo.baseFromFilename('Fruit bowl.sbowl.sbowl', ''),
+          'Fruit bowl');
+      expect(ProjectIo.baseFromFilename('Chart-cutlist.csv.csv', '-cutlist'),
+          'Chart');
+    });
+
+    test('a legitimate dot in the name is preserved', () {
+      // Only known export extensions are stripped, so "v1.2" survives.
+      expect(ProjectIo.baseFromFilename('Bowl v1.2.sbowl', ''), 'Bowl v1.2');
+    });
   });
 
   group('export base name follows a save-dialog rename', () {
@@ -57,6 +71,16 @@ void main() {
       // A subsequent cut-list export inherits the overridden base.
       expect(ProjectIo.baseFromFilename('Trial One-cutlist.csv', '-cutlist'),
           'Trial One');
+    });
+
+    test('a doubled-extension save does not double the next suggestion', () {
+      final c = makeContainer();
+      addTearDown(c.dispose);
+      final ctrl = c.read(projectControllerProvider.notifier);
+      ctrl.rename('Fruit bowl');
+      // Platform returned a doubled extension for this save.
+      ctrl.noteExportFilename('', 'Fruit bowl.sbowl.sbowl');
+      expect(ctrl.suggestedExportBase(), 'Fruit bowl');
     });
 
     test('editing the design name clears the override', () {

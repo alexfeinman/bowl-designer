@@ -14,6 +14,11 @@ class ProjectIo {
   /// Cut-list exports append this to the base name.
   static const String cutListSuffix = '-cutlist';
 
+  /// Extensions this app appends when saving/exporting. Only these are stripped
+  /// when recovering a base name, so a legitimate dot in a name (e.g. "v1.2")
+  /// survives.
+  static const List<String> _knownExtensions = [extension, 'json', 'csv', 'pdf', 'png'];
+
   /// Make [name] safe for a filename base (no extension).
   static String sanitize(String name) {
     final base = name.trim().isEmpty ? 'bowl' : name.trim();
@@ -21,12 +26,26 @@ class ProjectIo {
   }
 
   /// Recover the base name the user ended up with from a saved [filename],
-  /// stripping the extension and, if present, the [suffix] we appended (e.g.
+  /// stripping our extension(s) and, if present, the [suffix] we appended (e.g.
   /// "-cutlist" or " 3d"). Used to detect a rename in the save dialog.
+  ///
+  /// Known extensions are stripped repeatedly: some platforms (macOS
+  /// NSSavePanel via file_selector) append the type extension to a suggested
+  /// name that already carried it, yielding e.g. "Fruit bowl.sbowl.sbowl" —
+  /// which must collapse back to "Fruit bowl", not "Fruit bowl.sbowl".
   static String baseFromFilename(String filename, String suffix) {
-    var s = filename;
-    final dot = s.lastIndexOf('.');
-    if (dot > 0) s = s.substring(0, dot);
+    var s = filename.trim();
+    for (var stripped = true; stripped;) {
+      stripped = false;
+      for (final ext in _knownExtensions) {
+        final dotExt = '.$ext';
+        if (s.toLowerCase().endsWith(dotExt) && s.length > dotExt.length) {
+          s = s.substring(0, s.length - dotExt.length);
+          stripped = true;
+          break;
+        }
+      }
+    }
     if (suffix.isNotEmpty && s.endsWith(suffix)) {
       s = s.substring(0, s.length - suffix.length);
     }

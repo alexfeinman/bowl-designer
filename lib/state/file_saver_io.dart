@@ -17,6 +17,22 @@ Future<String?> saveBytes(
     acceptedTypeGroups: [XTypeGroup(label: typeLabel, extensions: extensions)],
   );
   if (location == null) return null;
-  await File(location.path).writeAsBytes(Uint8List.fromList(bytes));
-  return location.path.split(RegExp(r'[/\\]')).last;
+  final path = _collapseDoubledExtension(location.path, extensions);
+  await File(path).writeAsBytes(Uint8List.fromList(bytes));
+  return path.split(RegExp(r'[/\\]')).last;
+}
+
+/// Some save panels (notably macOS NSSavePanel) append the type extension to a
+/// suggested name that already carried it, yielding e.g. "Bowl.sbowl.sbowl".
+/// Collapse a doubled accepted extension so the file — and the name reported to
+/// callers — carries it exactly once. A no-op when there's no doubling.
+String _collapseDoubledExtension(String path, List<String> extensions) {
+  var p = path;
+  for (final ext in extensions) {
+    final doubled = '.$ext.$ext';
+    while (p.toLowerCase().endsWith(doubled.toLowerCase())) {
+      p = p.substring(0, p.length - ext.length - 1); // drop one ".$ext"
+    }
+  }
+  return p;
 }
